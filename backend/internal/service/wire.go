@@ -477,7 +477,7 @@ func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountReposi
 			panic("concurrency process recovery: " + err.Error())
 		}
 	}
-	if cfg == nil || !cfg.Gateway.Scheduling.SkipStartupSlotCleanup {
+	if os.Getenv("CONCURRENCY_PROCESS_OWNER_FILE") == "" && (cfg == nil || !cfg.Gateway.Scheduling.SkipStartupSlotCleanup) {
 		if err := svc.CleanupStaleProcessSlots(context.Background()); err != nil {
 			logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
 		}
