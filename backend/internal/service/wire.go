@@ -472,6 +472,11 @@ func ProvideDeferredService(accountRepo AccountRepository, timingWheel *TimingWh
 // ProvideConcurrencyService creates ConcurrencyService and starts slot cleanup worker.
 func ProvideConcurrencyService(cache ConcurrencyCache, accountRepo AccountRepository, cfg *config.Config) *ConcurrencyService {
 	svc := NewConcurrencyService(cache)
+	if path := os.Getenv("CONCURRENCY_PROCESS_OWNER_FILE"); path != "" {
+		if err := svc.recoverProcessSlots(path); err != nil {
+			panic("concurrency process recovery: " + err.Error())
+		}
+	}
 	if cfg == nil || !cfg.Gateway.Scheduling.SkipStartupSlotCleanup {
 		if err := svc.CleanupStaleProcessSlots(context.Background()); err != nil {
 			logger.LegacyPrintf("service.concurrency", "Warning: startup cleanup stale process slots failed: %v", err)
