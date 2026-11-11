@@ -1,0 +1,360 @@
+{
+  "name": "937pro-pool",
+  "services": {
+    "postgres": {
+      "restart": "unless-stopped",
+      "network_mode": "host",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "100m",
+          "max-file": "5"
+        }
+      },
+      "image": "postgres:18-alpine",
+      "container_name": "937pro-pool-postgres",
+      "environment": {
+        "POSTGRES_USER": "${POSTGRES_USER}",
+        "POSTGRES_DB": "${POSTGRES_DB}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD}",
+        "PGDATA": "/var/lib/postgresql/18/docker",
+        "TZ": "Asia/Shanghai",
+        "POSTGRES_INITDB_ARGS": "--auth-host=scram-sha-256 --auth-local=trust"
+      },
+      "volumes": [
+        "${PRO_POOL_RUNTIME_DIR:?PRO_POOL_RUNTIME_DIR is required}/postgres:/var/lib/postgresql"
+      ],
+      "mem_limit": "2g",
+      "shm_size": "256m",
+      "command": [
+        "postgres",
+        "-p",
+        "15433",
+        "-c",
+        "listen_addresses=127.0.0.1",
+        "-c",
+        "max_connections=64",
+        "-c",
+        "shared_buffers=256MB",
+        "-c",
+        "work_mem=4MB",
+        "-c",
+        "maintenance_work_mem=64MB"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -h 127.0.0.1 -p 15433 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 20
+      }
+    },
+    "redis": {
+      "restart": "unless-stopped",
+      "network_mode": "host",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "100m",
+          "max-file": "5"
+        }
+      },
+      "image": "redis:8.4-alpine",
+      "container_name": "937pro-pool-redis",
+      "environment": {
+        "REDIS_PASSWORD": "${REDIS_PASSWORD}"
+      },
+      "volumes": [
+        "${PRO_POOL_RUNTIME_DIR:?PRO_POOL_RUNTIME_DIR is required}/redis:/data"
+      ],
+      "mem_limit": "2g",
+      "command": [
+        "sh",
+        "-ec",
+        "exec redis-server --bind 127.0.0.1 --port 26379 --protected-mode yes --requirepass \"$$REDIS_PASSWORD\" --appendonly yes --appendfsync everysec --save \"900 1\" --maxmemory 1gb --maxmemory-policy noeviction"
+      ],
+      "healthcheck": {
+        "test": [
+          "CMD-SHELL",
+          "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli -h 127.0.0.1 -p 26379 ping | grep -q PONG"
+        ],
+        "interval": "5s",
+        "timeout": "5s",
+        "retries": 20
+      }
+    },
+    "http": {
+      "restart": "unless-stopped",
+      "network_mode": "host",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "100m",
+          "max-file": "5"
+        }
+      },
+      "image": "${PRO_POOL_IMAGE:?PRO_POOL_IMAGE is required}",
+      "container_name": "937pro-pool-recovery-http",
+      "environment": {
+        "AUTO_SETUP": "true",
+        "DATA_DIR": "/app/data",
+        "RUN_MODE": "simple",
+        "SIMPLE_MODE_AUTO_CREATE_DEFAULT_GROUPS": "false",
+        "SIMPLE_MODE_KEY_RATE_LIMIT_ENABLED": "false",
+        "SERVER_HOST": "127.0.0.1",
+        "SERVER_MODE": "release",
+        "GOMAXPROCS": "4",
+        "TZ": "Asia/Shanghai",
+        "DATABASE_HOST": "127.0.0.1",
+        "DATABASE_PORT": "15433",
+        "DATABASE_USER": "${POSTGRES_USER}",
+        "DATABASE_PASSWORD": "${POSTGRES_PASSWORD}",
+        "DATABASE_DBNAME": "${POSTGRES_DB}",
+        "DATABASE_SSLMODE": "disable",
+        "DATABASE_MAX_OPEN_CONNS": "16",
+        "DATABASE_MAX_IDLE_CONNS": "4",
+        "DATABASE_CONN_MAX_LIFETIME_MINUTES": "30",
+        "DATABASE_CONN_MAX_IDLE_TIME_MINUTES": "5",
+        "REDIS_HOST": "127.0.0.1",
+        "REDIS_PORT": "26379",
+        "REDIS_PASSWORD": "${REDIS_PASSWORD}",
+        "REDIS_DB": "0",
+        "REDIS_POOL_SIZE": "64",
+        "REDIS_MIN_IDLE_CONNS": "1",
+        "REDIS_ENABLE_TLS": "false",
+        "ADMIN_EMAIL": "${ADMIN_EMAIL}",
+        "ADMIN_PASSWORD": "${ADMIN_PASSWORD}",
+        "JWT_SECRET": "${JWT_SECRET}",
+        "JWT_EXPIRE_HOUR": "24",
+        "TOTP_ENCRYPTION_KEY": "${TOTP_ENCRYPTION_KEY}",
+        "LOG_LEVEL": "info",
+        "LOG_FORMAT": "json",
+        "LOG_OUTPUT_TO_STDOUT": "true",
+        "LOG_OUTPUT_TO_FILE": "false",
+        "LOG_SAMPLING_ENABLED": "false",
+        "GATEWAY_OPENAI_WS_ENABLED": "true",
+        "GATEWAY_OPENAI_WS_OAUTH_ENABLED": "true",
+        "GATEWAY_OPENAI_WS_FORCE_HTTP": "false",
+        "GATEWAY_OPENAI_WS_RESPONSES_WEBSOCKETS_V2": "true",
+        "GATEWAY_SCHEDULING_SKIP_STARTUP_SLOT_CLEANUP": "true",
+        "OPENAI_REQUEST_AUDIT_DIR": "/app/data/openai-request-audit",
+        "OPENAI_REQUEST_AUDIT_KEY_FILE": "/app/data/openai-request-audit.key",
+        "SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS": "true",
+        "SERVER_PORT": "28482",
+        "GOMEMLIMIT": "7GiB",
+        "GOGC": "80",
+        "CONCURRENCY_PROCESS_OWNER_FILE": "/app/data/concurrency-owners/listener-28482"
+      },
+      "volumes": [
+        "${PRO_POOL_RUNTIME_DIR:?PRO_POOL_RUNTIME_DIR is required}/data:/app/data"
+      ],
+      "mem_limit": "10g",
+      "ulimits": {
+        "nofile": {
+          "soft": 65536,
+          "hard": 65536
+        }
+      },
+      "depends_on": {
+        "postgres": {
+          "condition": "service_healthy"
+        },
+        "redis": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "wget",
+          "-q",
+          "-T",
+          "5",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:28482/health"
+        ],
+        "interval": "10s",
+        "timeout": "6s",
+        "retries": 6,
+        "start_period": "120s"
+      },
+      "stop_grace_period": "15m",
+      "memswap_limit": "10g"
+    },
+    "ws": {
+      "restart": "unless-stopped",
+      "network_mode": "host",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "100m",
+          "max-file": "5"
+        }
+      },
+      "image": "${PRO_POOL_IMAGE:?PRO_POOL_IMAGE is required}",
+      "container_name": "937pro-pool-recovery-ws",
+      "environment": {
+        "AUTO_SETUP": "true",
+        "DATA_DIR": "/app/data",
+        "RUN_MODE": "simple",
+        "SIMPLE_MODE_AUTO_CREATE_DEFAULT_GROUPS": "false",
+        "SIMPLE_MODE_KEY_RATE_LIMIT_ENABLED": "false",
+        "SERVER_HOST": "127.0.0.1",
+        "SERVER_MODE": "release",
+        "GOMAXPROCS": "2",
+        "TZ": "Asia/Shanghai",
+        "DATABASE_HOST": "127.0.0.1",
+        "DATABASE_PORT": "15433",
+        "DATABASE_USER": "${POSTGRES_USER}",
+        "DATABASE_PASSWORD": "${POSTGRES_PASSWORD}",
+        "DATABASE_DBNAME": "${POSTGRES_DB}",
+        "DATABASE_SSLMODE": "disable",
+        "DATABASE_MAX_OPEN_CONNS": "8",
+        "DATABASE_MAX_IDLE_CONNS": "2",
+        "DATABASE_CONN_MAX_LIFETIME_MINUTES": "30",
+        "DATABASE_CONN_MAX_IDLE_TIME_MINUTES": "5",
+        "REDIS_HOST": "127.0.0.1",
+        "REDIS_PORT": "26379",
+        "REDIS_PASSWORD": "${REDIS_PASSWORD}",
+        "REDIS_DB": "0",
+        "REDIS_POOL_SIZE": "64",
+        "REDIS_MIN_IDLE_CONNS": "1",
+        "REDIS_ENABLE_TLS": "false",
+        "ADMIN_EMAIL": "${ADMIN_EMAIL}",
+        "ADMIN_PASSWORD": "${ADMIN_PASSWORD}",
+        "JWT_SECRET": "${JWT_SECRET}",
+        "JWT_EXPIRE_HOUR": "24",
+        "TOTP_ENCRYPTION_KEY": "${TOTP_ENCRYPTION_KEY}",
+        "LOG_LEVEL": "info",
+        "LOG_FORMAT": "json",
+        "LOG_OUTPUT_TO_STDOUT": "true",
+        "LOG_OUTPUT_TO_FILE": "false",
+        "LOG_SAMPLING_ENABLED": "false",
+        "GATEWAY_OPENAI_WS_ENABLED": "true",
+        "GATEWAY_OPENAI_WS_OAUTH_ENABLED": "true",
+        "GATEWAY_OPENAI_WS_FORCE_HTTP": "false",
+        "GATEWAY_OPENAI_WS_RESPONSES_WEBSOCKETS_V2": "true",
+        "GATEWAY_SCHEDULING_SKIP_STARTUP_SLOT_CLEANUP": "true",
+        "OPENAI_REQUEST_AUDIT_DIR": "/app/data/openai-request-audit",
+        "OPENAI_REQUEST_AUDIT_KEY_FILE": "/app/data/openai-request-audit.key",
+        "SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS": "true",
+        "SERVER_PORT": "28484",
+        "GATEWAY_OPENAI_WS_MODE_ROUTER_V2_ENABLED": "true",
+        "GATEWAY_OPENAI_WS_INGRESS_MODE_DEFAULT": "off",
+        "GOMEMLIMIT": "1400MiB",
+        "GOGC": "80",
+        "CONCURRENCY_PROCESS_OWNER_FILE": "/app/data/concurrency-owners/listener-28484"
+      },
+      "volumes": [
+        "${PRO_POOL_RUNTIME_DIR:?PRO_POOL_RUNTIME_DIR is required}/data:/app/data"
+      ],
+      "mem_limit": "2g",
+      "ulimits": {
+        "nofile": {
+          "soft": 65536,
+          "hard": 65536
+        }
+      },
+      "depends_on": {
+        "http": {
+          "condition": "service_healthy"
+        },
+        "redis": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "wget",
+          "-q",
+          "-T",
+          "5",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:28484/health"
+        ],
+        "interval": "10s",
+        "timeout": "6s",
+        "retries": 6,
+        "start_period": "120s"
+      },
+      "stop_grace_period": "15m",
+      "memswap_limit": "2g"
+    },
+    "entry": {
+      "restart": "unless-stopped",
+      "network_mode": "host",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-size": "100m",
+          "max-file": "5"
+        }
+      },
+      "image": "nginx:1.27-alpine",
+      "container_name": "937pro-pool-entry",
+      "environment": {
+        "PRO_POOL_PRIVATE_IP": "${PRO_POOL_PRIVATE_IP}",
+        "NGINX_ENVSUBST_FILTER": "^PRO_POOL_PRIVATE_IP$"
+      },
+      "volumes": [
+        "./nginx.conf.template:/etc/pro-pool-nginx.conf.template:ro"
+      ],
+      "command": [
+        "sh",
+        "-ec",
+        "envsubst '$${PRO_POOL_PRIVATE_IP}' < /etc/pro-pool-nginx.conf.template > /etc/nginx/nginx.conf; exec nginx -g 'daemon off;'"
+      ],
+      "mem_limit": "256m",
+      "depends_on": {
+        "http": {
+          "condition": "service_healthy"
+        },
+        "ws": {
+          "condition": "service_healthy"
+        }
+      },
+      "healthcheck": {
+        "test": [
+          "CMD",
+          "wget",
+          "-q",
+          "-T",
+          "5",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:6066/health"
+        ],
+        "interval": "10s",
+        "timeout": "6s",
+        "retries": 6
+      },
+      "ulimits": {
+        "nofile": {
+          "soft": 65536,
+          "hard": 65536
+        }
+      },
+      "stop_grace_period": "15m"
+    }
+  }
+}
