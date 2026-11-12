@@ -149,10 +149,10 @@
         "GATEWAY_OPENAI_WS_RESPONSES_WEBSOCKETS_V2": "true",
         "GATEWAY_SCHEDULING_SKIP_STARTUP_SLOT_CLEANUP": "true",
         "SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS": "true",
-        "SERVER_PORT": "30482",
+        "SERVER_PORT": "19482",
         "GOMEMLIMIT": "7GiB",
         "GOGC": "80",
-        "CONCURRENCY_PROCESS_OWNER_FILE": "/app/data/concurrency-owners/listener-30482"
+        "CONCURRENCY_PROCESS_OWNER_FILE": "/app/data/concurrency-owners/listener-19482"
       },
       "volumes": [
         "${PRO_POOL_RUNTIME_DIR:?PRO_POOL_RUNTIME_DIR is required}/data:/app/data"
@@ -181,7 +181,7 @@
           "5",
           "-O",
           "/dev/null",
-          "http://127.0.0.1:30482/health"
+          "http://127.0.0.1:19482/health"
         ],
         "interval": "10s",
         "timeout": "6s",
@@ -249,12 +249,12 @@
         "GATEWAY_OPENAI_WS_RESPONSES_WEBSOCKETS_V2": "true",
         "GATEWAY_SCHEDULING_SKIP_STARTUP_SLOT_CLEANUP": "true",
         "SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS": "true",
-        "SERVER_PORT": "30484",
+        "SERVER_PORT": "19484",
         "GATEWAY_OPENAI_WS_MODE_ROUTER_V2_ENABLED": "true",
         "GATEWAY_OPENAI_WS_INGRESS_MODE_DEFAULT": "off",
         "GOMEMLIMIT": "1400MiB",
         "GOGC": "80",
-        "CONCURRENCY_PROCESS_OWNER_FILE": "/app/data/concurrency-owners/listener-30484"
+        "CONCURRENCY_PROCESS_OWNER_FILE": "/app/data/concurrency-owners/listener-19484"
       },
       "volumes": [
         "${PRO_POOL_RUNTIME_DIR:?PRO_POOL_RUNTIME_DIR is required}/data:/app/data"
@@ -283,7 +283,7 @@
           "5",
           "-O",
           "/dev/null",
-          "http://127.0.0.1:30484/health"
+          "http://127.0.0.1:19484/health"
         ],
         "interval": "10s",
         "timeout": "6s",

@@ -5,7 +5,7 @@ B source remains /www/wwwroot/sub2api-b-v290-merge. Do not fast-forward B for P-
 
 Runtime data, PostgreSQL (15433), Redis (26379 DB 0), credentials and simple mode remain independent.
 Current image: 937pro-pool:load-2d965fc15.
-HTTP: 30482, WS: 30484; stable internal entry: 6066.
+HTTP: 19482, WS: 19484; stable internal entry: 6066.
 Public pool.apihelm.com remains an administration site; inference uses the private entry.
 
 HTTP uses GOMEMLIMIT=7GiB, GOGC=80, a 10 GiB container limit.
