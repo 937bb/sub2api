@@ -105,7 +105,7 @@
         }
       },
       "image": "${PRO_POOL_IMAGE:?PRO_POOL_IMAGE is required}",
-      "container_name": "937pro-pool-load-http",
+      "container_name": "937pro-pool-noaudit-http",
       "environment": {
         "AUTO_SETUP": "true",
         "DATA_DIR": "/app/data",
@@ -148,13 +148,11 @@
         "GATEWAY_OPENAI_WS_FORCE_HTTP": "false",
         "GATEWAY_OPENAI_WS_RESPONSES_WEBSOCKETS_V2": "true",
         "GATEWAY_SCHEDULING_SKIP_STARTUP_SLOT_CLEANUP": "true",
-        "OPENAI_REQUEST_AUDIT_DIR": "/app/data/openai-request-audit",
-        "OPENAI_REQUEST_AUDIT_KEY_FILE": "/app/data/openai-request-audit.key",
         "SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS": "true",
-        "SERVER_PORT": "29482",
+        "SERVER_PORT": "30482",
         "GOMEMLIMIT": "7GiB",
         "GOGC": "80",
-        "CONCURRENCY_PROCESS_OWNER_FILE": "/app/data/concurrency-owners/listener-29482"
+        "CONCURRENCY_PROCESS_OWNER_FILE": "/app/data/concurrency-owners/listener-30482"
       },
       "volumes": [
         "${PRO_POOL_RUNTIME_DIR:?PRO_POOL_RUNTIME_DIR is required}/data:/app/data"
@@ -183,7 +181,7 @@
           "5",
           "-O",
           "/dev/null",
-          "http://127.0.0.1:29482/health"
+          "http://127.0.0.1:30482/health"
         ],
         "interval": "10s",
         "timeout": "6s",
@@ -207,7 +205,7 @@
         }
       },
       "image": "${PRO_POOL_IMAGE:?PRO_POOL_IMAGE is required}",
-      "container_name": "937pro-pool-load-ws",
+      "container_name": "937pro-pool-noaudit-ws",
       "environment": {
         "AUTO_SETUP": "true",
         "DATA_DIR": "/app/data",
@@ -250,15 +248,13 @@
         "GATEWAY_OPENAI_WS_FORCE_HTTP": "false",
         "GATEWAY_OPENAI_WS_RESPONSES_WEBSOCKETS_V2": "true",
         "GATEWAY_SCHEDULING_SKIP_STARTUP_SLOT_CLEANUP": "true",
-        "OPENAI_REQUEST_AUDIT_DIR": "/app/data/openai-request-audit",
-        "OPENAI_REQUEST_AUDIT_KEY_FILE": "/app/data/openai-request-audit.key",
         "SECURITY_URL_ALLOWLIST_ALLOW_PRIVATE_HOSTS": "true",
-        "SERVER_PORT": "29484",
+        "SERVER_PORT": "30484",
         "GATEWAY_OPENAI_WS_MODE_ROUTER_V2_ENABLED": "true",
         "GATEWAY_OPENAI_WS_INGRESS_MODE_DEFAULT": "off",
         "GOMEMLIMIT": "1400MiB",
         "GOGC": "80",
-        "CONCURRENCY_PROCESS_OWNER_FILE": "/app/data/concurrency-owners/listener-29484"
+        "CONCURRENCY_PROCESS_OWNER_FILE": "/app/data/concurrency-owners/listener-30484"
       },
       "volumes": [
         "${PRO_POOL_RUNTIME_DIR:?PRO_POOL_RUNTIME_DIR is required}/data:/app/data"
@@ -287,7 +283,7 @@
           "5",
           "-O",
           "/dev/null",
-          "http://127.0.0.1:29484/health"
+          "http://127.0.0.1:30484/health"
         ],
         "interval": "10s",
         "timeout": "6s",

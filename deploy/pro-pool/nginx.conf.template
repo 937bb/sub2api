@@ -8,8 +8,8 @@ http {
   log_format pool '$time_iso8601 $request_id $remote_addr $request_method $uri $status $upstream_addr $upstream_status $request_time';
   access_log /var/log/nginx/access.log pool;
   map $http_upgrade $pool_upstream {
-    default http://127.0.0.1:29482;
-    ~*websocket http://127.0.0.1:29484;
+    default http://127.0.0.1:30482;
+    ~*websocket http://127.0.0.1:30484;
   }
   map $http_upgrade $connection_upgrade {
     default upgrade;

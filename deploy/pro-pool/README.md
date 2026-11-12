@@ -5,7 +5,7 @@ B source remains /www/wwwroot/sub2api-b-v290-merge. Do not fast-forward B for P-
 
 Runtime data, PostgreSQL (15433), Redis (26379 DB 0), credentials and simple mode remain independent.
 Current image: 937pro-pool:load-2d965fc15.
-HTTP: 29482, WS: 29484; stable internal entry: 6066.
+HTTP: 30482, WS: 30484; stable internal entry: 6066.
 Public pool.apihelm.com remains an administration site; inference uses the private entry.
 
 HTTP uses GOMEMLIMIT=7GiB, GOGC=80, a 10 GiB container limit.
@@ -36,8 +36,15 @@ A candidate-only SIGKILL restart test verified cleanup of its own slots while
 preserving another owner. HTTP tool roundtrip and WS two-turn usage passed.
 
 2026-11-12 load repair: app commit 2d965fc15 changes text-role replacement to a
-linear pass. P moderation and encrypted request-body evidence remain enabled.
+linear pass. P moderation remains enabled. Custom request-body evidence is disabled.
 B moderation and body evidence are disabled; normal usage/billing remain enabled.
 Evidence: /root/candidates/load-repair-20261112. Separate B app commit b091060fa.
 Retain the pre-repair containers for rollback, and drain before stopping them.
 No schema migrations or pricing/concurrency-policy changes in this release.
+
+2026-11-12: User requested removal of custom request-body logging. Both P listeners
+omit OPENAI_REQUEST_AUDIT_DIR and OPENAI_REQUEST_AUDIT_KEY_FILE. This prevents
+initializing the audit store and serializing/redacting/compressing request bodies.
+Keep these environment variables absent on future deployments. Content moderation,
+usage, billing and normal operational logs remain enabled. Historical encrypted
+files were not deleted by this configuration change.
