@@ -59,24 +59,47 @@ func normalizeCodexDeveloperMessages(body []byte, account *Account) ([]byte, boo
 	if !input.IsArray() {
 		return body, false, nil
 	}
-	next := body
-	changed := false
-	for i, item := range input.Array() {
+	// Keep offsets in the original JSON. Repeated sjson.SetBytes calls scan and
+	// copy the whole conversation for each user turn (quadratic for long history).
+	// Collect only role value spans, then copy the request once.
+	type roleSpan struct{ start, end int }
+	var spans []roleSpan
+	extraBytes := 0
+	var spanErr error
+	input.ForEach(func(_, item gjson.Result) bool {
 		kind := item.Get("type")
-		if !item.IsObject() || item.Get("role").String() != "user" ||
+		role := item.Get("role")
+		if !item.IsObject() || role.String() != "user" ||
 			(kind.Exists() && kind.String() != "message") ||
 			item.Get("tool_call_id").Exists() || item.Get("tool_calls").Exists() ||
 			!codexDeveloperTextContent(item.Get("content")) {
-			continue
+			return true
 		}
-		var err error
-		next, err = sjson.SetBytes(next, fmt.Sprintf("input.%d.role", i), "developer")
-		if err != nil {
-			return body, false, fmt.Errorf("normalize Codex developer message role: %w", err)
+		end := role.Index + len(role.Raw)
+		if role.Index < 0 || end > len(body) || string(body[role.Index:end]) != role.Raw ||
+			(len(spans) > 0 && role.Index < spans[len(spans)-1].end) {
+			spanErr = fmt.Errorf("normalize Codex developer message role: invalid JSON offset")
+			return false
 		}
-		changed = true
+		spans = append(spans, roleSpan{role.Index, end})
+		extraBytes += len(`"developer"`) - len(role.Raw)
+		return true
+	})
+	if spanErr != nil {
+		return body, false, spanErr
 	}
-	return next, changed, nil
+	if len(spans) == 0 {
+		return body, false, nil
+	}
+	next := make([]byte, 0, len(body)+extraBytes)
+	previous := 0
+	for _, span := range spans {
+		next = append(next, body[previous:span.start]...)
+		next = append(next, `"developer"`...)
+		previous = span.end
+	}
+	next = append(next, body[previous:]...)
+	return next, true, nil
 }
 
 // The pooled HTTP-to-WS path holds decoded messages. Clone changed envelopes
