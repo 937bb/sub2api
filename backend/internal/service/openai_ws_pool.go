@@ -90,6 +90,9 @@ type openAIWSHandshakeCompatibilityKey struct {
 	userAgent           string
 	originator          string
 	clientVersion       string
+	acceptLanguage      string
+	parentThreadID      string
+	subagent            string
 	protocolBeta        string
 	chatGPTAccountID    string
 	fedRAMP             string
@@ -2432,6 +2435,9 @@ func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Head
 		userAgent:        codexIdentityHeaderValue(headers, "User-Agent"),
 		originator:       codexIdentityHeaderValue(headers, "Originator"),
 		clientVersion:    codexIdentityHeaderValue(headers, "Version"),
+		acceptLanguage:   strings.Join(headers.Values("Accept-Language"), ","),
+		parentThreadID:   codexIdentityHeaderValue(headers, codexParentThreadIDHeader),
+		subagent:         codexIdentityHeaderValue(headers, openAISubagentHeader),
 		protocolBeta:     strings.Join(headers.Values("OpenAI-Beta"), ","),
 		chatGPTAccountID: codexIdentityHeaderValue(headers, "ChatGPT-Account-ID"),
 		fedRAMP:          codexIdentityHeaderValue(headers, "X-OpenAI-Fedramp"),

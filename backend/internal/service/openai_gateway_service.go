@@ -61,6 +61,8 @@ const (
 
 // OpenAI allowed headers whitelist (for non-passthrough).
 var openaiAllowedHeaders = map[string]bool{
+	codexParentThreadIDHeader: true,
+	openAISubagentHeader:      true,
 	"accept-language":         true,
 	"content-type":            true,
 	"conversation_id":         true,
@@ -83,6 +85,8 @@ var openaiAllowedHeaders = map[string]bool{
 // OpenAI passthrough allowed headers whitelist.
 // Restrict forwarding to supported protocol and client metadata.
 var openaiPassthroughAllowedHeaders = map[string]bool{
+	codexParentThreadIDHeader: true,
+	openAISubagentHeader:      true,
 	"accept":                  true,
 	"accept-language":         true,
 	"content-type":            true,

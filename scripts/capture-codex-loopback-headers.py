@@ -26,7 +26,8 @@ def capture(cli, mode):
             if length > 8 * 1024 * 1024:
                 self.send_error(413)
                 return
-            self.rfile.read(length)
+            raw_body = self.rfile.read(length)
+            body = json.loads(raw_body) if raw_body else {}
             headers = dict((k.lower(), v) for k, v in self.headers.items())
             metadata = json.loads(headers.get("x-codex-turn-metadata", "{}"))
             observations.append({
@@ -39,6 +40,15 @@ def capture(cli, mode):
                 "websocket_extensions": headers.get("sec-websocket-extensions"),
                 "metadata_fields": sorted(metadata),
                 "request_kind": metadata.get("request_kind"),
+                "analytics_enabled": metadata.get("analytics_enabled"),
+                "turn_id_present": "turn_id" in metadata,
+                "turn_id_type": type(metadata.get("turn_id")).__name__,
+                "turn_id_empty": metadata.get("turn_id") == "",
+                "session_equals_thread": bool(headers.get("session-id")) and headers.get("session-id") == headers.get("thread-id"),
+                "thread_equals_request": bool(headers.get("thread-id")) and headers.get("thread-id") == headers.get("x-client-request-id"),
+                "window_has_session_prefix": bool(headers.get("session-id")) and str(metadata.get("window_id", "")).startswith(headers["session-id"] + ":"),
+                "prompt_cache_equals_session": bool(body.get("prompt_cache_key")) and body.get("prompt_cache_key") == headers.get("session-id"),
+                "body_fields": sorted(body),
                 "root_equals_turn": bool(metadata.get("turn_id")) and metadata.get("turn_id") == metadata.get("root_turn_id"),
                 "body_bytes": length,
             })
@@ -71,6 +81,13 @@ wire_api="responses"
 supports_websockets={enabled}
 request_max_retries=0
 stream_max_retries=0
+[analytics]
+enabled=false
+[otel]
+exporter="none"
+trace_exporter="none"
+metrics_exporter="none"
+log_user_prompt=false
 '''
             Path(directory, "config.toml").write_text(config)
             env = {k: os.environ[k] for k in ("PATH", "TMPDIR", "LANG") if k in os.environ}

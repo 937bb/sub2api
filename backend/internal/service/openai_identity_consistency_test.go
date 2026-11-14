@@ -58,7 +58,7 @@ func TestCodexIdentityDoesNotSelectTransportBeta(t *testing.T) {
 }
 
 func TestOpenAIWSIdentityChangeDoesNotReuseOldHandshake(t *testing.T) {
-	for _, field := range []string{"User-Agent", "Originator", "Version", "OpenAI-Beta", "ChatGPT-Account-ID", "X-OpenAI-Fedramp", "url"} {
+	for _, field := range []string{"User-Agent", "Originator", "Version", "Accept-Language", codexParentThreadIDHeader, openAISubagentHeader, "OpenAI-Beta", "ChatGPT-Account-ID", "X-OpenAI-Fedramp", "url"} {
 		t.Run(field, func(t *testing.T) {
 			cfg := &config.Config{}
 			cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
