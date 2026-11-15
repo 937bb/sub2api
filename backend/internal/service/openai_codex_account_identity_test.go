@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -104,6 +105,51 @@ func TestCodexAccountIdentityScopingPreservesDesktopRootRelations(t *testing.T) 
 	require.NoError(t, err)
 	require.Equal(t, uuid.Version(7), parsed.Version())
 	require.Equal(t, stableCodexUUIDV7Timestamp(root), stableCodexUUIDV7Timestamp(session))
+}
+
+func TestCodexLegacyV4SeedRetainsPreDesktopIdentityAndCacheNamespace(t *testing.T) {
+	seed := "11111111-1111-4111-8111-111111111111"
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "legacy-account",
+		},
+		Extra: map[string]any{codexFingerprintSeedExtraKey: seed},
+	}
+	apiKeyID := int64(77)
+	namespace := codexAccountIdentityNamespace(account)
+
+	require.True(t, usesLegacyCodexAccountIdentity(account))
+	require.Equal(t,
+		deriveLegacyCodexUUIDv4("sub2api:codex-install-id:v2:"+seed),
+		codexAccountInstallationID(account),
+	)
+	for _, tc := range []struct {
+		kind string
+		raw  string
+	}{
+		{kind: "session", raw: "client-session"},
+		{kind: "prompt-cache", raw: "explicit-cache-key"},
+		{kind: "thread", raw: "client-thread"},
+	} {
+		want := deriveLegacyCodexUUIDv4(fmt.Sprintf(
+			"sub2api:codex-account-identity:v1:user:%d:account:%s:kind:%s:value:%s",
+			apiKeyID,
+			namespace,
+			tc.kind,
+			tc.raw,
+		))
+		require.Equal(t, want, scopeCodexAccountIdentityValue(account, apiKeyID, tc.kind, tc.raw), tc.kind)
+	}
+
+	body := []byte(`{"prompt_cache_key":"client-session","client_metadata":{"session_id":"client-session"}}`)
+	rewritten, changed, err := applyCodexAccountIdentityClientMetadataRaw(body, account, apiKeyID)
+	require.NoError(t, err)
+	require.True(t, changed)
+	wantSession := scopeCodexAccountIdentityValue(account, apiKeyID, "session", "client-session")
+	require.Equal(t, wantSession, gjson.GetBytes(rewritten, "prompt_cache_key").String())
+	require.Equal(t, wantSession, gjson.GetBytes(rewritten, "client_metadata.session_id").String())
 }
 
 func TestCodexAccountIdentitySourceResolvesShadowAndOverwritesFailoverContext(t *testing.T) {

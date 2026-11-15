@@ -16,6 +16,34 @@ import (
 
 const codexAccountIdentitySourceContextKey = "openai_codex_account_identity_source"
 
+const codexAccountIdentityLegacyNamespaceVersion = "v1"
+
+// Existing accounts persisted UUIDv4 seeds before the Desktop UUIDv7 rollout.
+// Those seeds are durable upstream identities: changing their derivation rotates
+// prompt_cache_key, installation and session namespaces, invalidating every warm
+// upstream cache at once. Keep the exact pre-rollout mapping for those accounts;
+// newly created UUIDv7 seeds use the Desktop-aligned mapping below.
+func usesLegacyCodexAccountIdentity(account *Account) bool {
+	if account == nil {
+		return false
+	}
+	seed, ok := codexFingerprintSeed(account.Extra)
+	if !ok {
+		return false
+	}
+	parsed, err := uuid.Parse(seed)
+	return err == nil && parsed.Version() != uuid.Version(7)
+}
+
+func deriveLegacyCodexUUIDv4(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	var id uuid.UUID
+	copy(id[:], sum[:16])
+	id[6] = (id[6] & 0x0f) | 0x40
+	id[8] = (id[8] & 0x3f) | 0x80
+	return id.String()
+}
+
 // prepareCodexAccountIdentitySource resolves credential shadows once per selected
 // attempt. The handler reuses gin.Context across failover attempts, so every entry
 // point overwrites the staged source before projecting outbound identity.
@@ -85,6 +113,9 @@ func codexAccountInstallationID(account *Account) string {
 		return deviceID
 	}
 	if seed, ok := codexFingerprintSeed(account.Extra); ok {
+		if usesLegacyCodexAccountIdentity(account) {
+			return deriveLegacyCodexUUIDv4("sub2api:codex-install-id:v2:" + seed)
+		}
 		return resolveConvergedInstallationID(account, seed)
 	}
 	if namespace := codexAccountIdentityNamespace(account); namespace != "" {
@@ -131,6 +162,16 @@ func scopeCodexAccountIdentityValue(account *Account, apiKeyID int64, kind, raw 
 	namespace := codexAccountIdentityNamespace(account)
 	if raw == "" || namespace == "" {
 		return raw
+	}
+	if usesLegacyCodexAccountIdentity(account) {
+		return deriveLegacyCodexUUIDv4(fmt.Sprintf(
+			"sub2api:codex-account-identity:%s:user:%d:account:%s:kind:%s:value:%s",
+			codexAccountIdentityLegacyNamespaceVersion,
+			apiKeyID,
+			namespace,
+			kind,
+			raw,
+		))
 	}
 	scope := fmt.Sprintf(
 		"sub2api:codex-account-identity:v2:user:%d:account:%s",
