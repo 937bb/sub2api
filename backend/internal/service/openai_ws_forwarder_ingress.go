@@ -409,6 +409,19 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			normalized = next
 		}
+		if account.UsesOpenAICodexProtocol() {
+			compatiblePayload, changed, compatibilityErr := stripUnsupportedOpenAIPromptCacheOptions(normalized, upstreamModel)
+			if compatibilityErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
+					coderws.StatusPolicyViolation,
+					"invalid prompt cache options",
+					compatibilityErr,
+				)
+			}
+			if changed {
+				normalized = compatiblePayload
+			}
+		}
 		SetOpsUpstreamModel(c, upstreamModel)
 		if isCodexCLI && codexImageGenerationExplicitToolPolicy == codexImageGenerationExplicitToolPolicyStrip {
 			if stripped, changed, stripErr := stripOpenAIImageGenerationToolsFromRawPayload(normalized); stripErr != nil {

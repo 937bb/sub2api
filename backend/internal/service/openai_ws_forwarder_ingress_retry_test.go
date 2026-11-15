@@ -162,6 +162,99 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_PreflightPingTol
 	require.Equal(t, 1, dialer.DialCount(), "预检 ping 慢于 2 秒不应换连")
 }
 
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_StripsObservedUnsupportedPromptCacheOptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+	cfg.Gateway.OpenAIWS.Enabled = true
+	cfg.Gateway.OpenAIWS.OAuthEnabled = true
+	cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+	cfg.Gateway.OpenAIWS.QueueLimitPerConn = 8
+	cfg.Gateway.OpenAIWS.DialTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.ReadTimeoutSeconds = 3
+	cfg.Gateway.OpenAIWS.WriteTimeoutSeconds = 3
+
+	captureConn := &openAIWSCaptureConn{events: [][]byte{
+		[]byte(`{"type":"response.completed","response":{"id":"resp_prompt_cache_options","model":"gpt-6.1-sol","usage":{"input_tokens":1,"output_tokens":1}}}`),
+	}}
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn})
+	defer pool.Close()
+
+	svc := &OpenAIGatewayService{
+		cfg:              cfg,
+		httpUpstream:     &httpUpstreamRecorder{},
+		cache:            &stubGatewayCache{},
+		openaiWSResolver: NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:    NewCodexToolCorrector(),
+		openaiWSPool:     pool,
+	}
+	account := &Account{
+		ID:          445,
+		Name:        "openai-ingress-prompt-cache-options",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+		Extra:       map[string]any{"responses_websockets_v2_enabled": true},
+	}
+
+	serverErrCh := make(chan error, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		ginCtx, _ := gin.CreateTestContext(httptest.NewRecorder())
+		ginCtx.Request = r.Clone(r.Context())
+		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		_, firstMessage, readErr := conn.Read(readCtx)
+		cancel()
+		if readErr != nil {
+			serverErrCh <- readErr
+			return
+		}
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "oauth-token", firstMessage, nil)
+	}))
+	defer wsServer.Close()
+
+	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(wsServer.URL, "http"), nil)
+	cancelDial()
+	require.NoError(t, err)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-6.1-sol","stream":true,"store":false,"prompt_cache_options":{"ttl":"24h"},"input":"hello"}`))
+	cancelWrite()
+	require.NoError(t, err)
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+	_, completed, err := clientConn.Read(readCtx)
+	cancelRead()
+	require.NoError(t, err)
+	require.Equal(t, "response.completed", gjson.GetBytes(completed, "type").String())
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+
+	select {
+	case serverErr := <-serverErrCh:
+		require.NoError(t, serverErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiting for ingress websocket shutdown timed out")
+	}
+	captureConn.mu.Lock()
+	upstreamPayload := cloneMapStringAny(captureConn.lastWrite)
+	captureConn.mu.Unlock()
+	require.NotNil(t, upstreamPayload)
+	require.NotContains(t, upstreamPayload, "prompt_cache_options")
+}
+
 // 场景：池内两条空闲连接同批陈旧（首读即失败）。首轮拿到其一失败后重试，
 // 重试必须新建连接，而不是再从池里拿另一条同样陈旧的连接。
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_TurnRetryForcesFreshConn(t *testing.T) {
