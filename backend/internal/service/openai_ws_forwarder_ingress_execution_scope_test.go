@@ -365,3 +365,128 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_SameCodexThreadS
 	}
 	require.Equal(t, 1, preempted, "应恰好有一条会话被抢占")
 }
+
+func TestDesktopWSFrameMetadataSurvivesPrewarmHandshake(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := newOpenAIWSExecutionScopeTestConfig()
+
+	captureConn := &openAIWSCaptureConn{
+		events: [][]byte{
+			[]byte(`{"type":"response.completed","response":{"id":"resp_exec_scope","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_next","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+		},
+	}
+	handshake := http.Header{}
+	handshake.Set(openAIWSTurnStateHeader, "turn-state-from-upstream")
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn, handshake: handshake})
+	defer pool.Close()
+
+	stateStore := NewOpenAIWSStateStore(nil)
+	svc := &OpenAIGatewayService{
+		cfg:                cfg,
+		httpUpstream:       &httpUpstreamRecorder{},
+		cache:              &stubGatewayCache{},
+		openaiWSResolver:   NewOpenAIWSProtocolResolver(cfg),
+		toolCorrector:      NewCodexToolCorrector(),
+		openaiWSPool:       pool,
+		openaiWSStateStore: stateStore,
+	}
+	groupID := int64(9)
+	account := &Account{
+		ID:          454,
+		Name:        "openai-ingress-exec-scope",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "fixture", "chatgpt_account_id": "fixture-upstream"},
+		Extra:       map[string]any{"responses_websockets_v2_enabled": true},
+	}
+
+	serverErrCh := make(chan error, 1)
+	keysCh := make(chan [2]string, 1)
+	wsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		rec := httptest.NewRecorder()
+		ginCtx, _ := gin.CreateTestContext(rec)
+		req := r.Clone(r.Context())
+		req.Header = req.Header.Clone()
+		req.Header.Set("User-Agent", "unit-test-agent/1.0")
+		req.Header.Set(openAIWSTurnMetadataHeader, `{"session_id":"root-session","thread_id":"child-thread","request_kind":"prewarm","turn_id":"","analytics_enabled":false}`)
+		ginCtx.Request = req
+		ginCtx.Set("api_key", &APIKey{ID: 21, GroupID: &groupID})
+		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		_, firstMessage, readErr := conn.Read(readCtx)
+		cancel()
+		if readErr != nil {
+			serverErrCh <- readErr
+			return
+		}
+		scope, _ := resolveOpenAIWSExecutionScope(ginCtx, firstMessage, 21)
+		keysCh <- [2]string{svc.GenerateSessionHash(ginCtx, firstMessage), scope}
+		serverErrCh <- svc.ProxyResponsesWebSocketFromClient(r.Context(), ginCtx, conn, account, "sk-test", firstMessage, nil)
+	}))
+	defer wsServer.Close()
+
+	clientConn := dialOpenAIWSExecutionScopeClient(t, wsServer.URL, "child-thread")
+	defer func() { _ = clientConn.CloseNow() }()
+	writeOpenAIWSExecutionScopeRequest(t, clientConn, `{"type":"response.create","model":"gpt-5.1","stream":false,"store":false,"input":[{"role":"user","content":"first"}],"client_metadata":{"turn_id":"turn-current","root_turn_id":"turn-current","x-codex-turn-metadata":"{\"session_id\":\"root-session\",\"thread_id\":\"child-thread\",\"request_kind\":\"turn\",\"turn_id\":\"turn-current\",\"root_turn_id\":\"turn-current\",\"analytics_enabled\":false}"}}`)
+
+	readCtx, cancelRead := context.WithTimeout(context.Background(), 3*time.Second)
+	_, completed, readErr := clientConn.Read(readCtx)
+	cancelRead()
+	require.NoError(t, readErr)
+	require.Equal(t, "resp_exec_scope", gjson.GetBytes(completed, "response.id").String())
+	// A second request on the same socket retains its own turn identity.
+	writeOpenAIWSExecutionScopeRequest(t, clientConn, `{"type":"response.create","model":"gpt-5.1","store":false,"input":[{"role":"user","content":"next"}],"client_metadata":{"turn_id":"turn-next","root_turn_id":"turn-next","x-codex-turn-metadata":"{\"thread_id\":\"child-thread\",\"request_kind\":\"turn\",\"turn_id\":\"turn-next\",\"root_turn_id\":\"turn-next\"}"}}`)
+	readCtx2, cancelRead2 := context.WithTimeout(context.Background(), 3*time.Second)
+	_, completed2, readErr2 := clientConn.Read(readCtx2)
+	cancelRead2()
+	require.NoError(t, readErr2)
+	require.Equal(t, "resp_next", gjson.GetBytes(completed2, "response.id").String())
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+
+	select {
+	case serverErr := <-serverErrCh:
+		require.NoError(t, serverErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("等待 ingress websocket 结束超时")
+	}
+	keys := <-keysCh
+	legacyHash, scope := keys[0], keys[1]
+	require.NotEmpty(t, legacyHash)
+	require.Len(t, scope, 16)
+	require.NotEqual(t, legacyHash, scope)
+
+	_, connBoundToLegacy := stateStore.GetSessionConn(groupID, legacyHash)
+	require.False(t, connBoundToLegacy, "上游连接不得绑定到按 session-id 算出的会话哈希")
+	_, connBoundToScope := stateStore.GetSessionConn(groupID, scope)
+	require.True(t, connBoundToScope, "上游连接应绑定到执行作用域")
+	_, turnStateOnLegacy := stateStore.GetSessionTurnState(groupID, legacyHash)
+	require.False(t, turnStateOnLegacy, "turn state 不得绑定到会话哈希")
+	turnState, turnStateOnScope := stateStore.GetSessionTurnState(groupID, scope)
+	require.True(t, turnStateOnScope, "turn state 应绑定到执行作用域")
+	require.Equal(t, "turn-state-from-upstream", turnState)
+
+	captureConn.mu.Lock()
+	defer captureConn.mu.Unlock()
+	require.Len(t, captureConn.writes, 2)
+	wire := requestToJSONString(captureConn.writes[0])
+	embedded := gjson.Get(wire, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, "turn", gjson.Get(embedded, "request_kind").String())
+	require.Equal(t, gjson.Get(wire, "client_metadata.turn_id").String(), gjson.Get(embedded, "turn_id").String())
+	require.NotEmpty(t, gjson.Get(wire, "client_metadata.turn_id").String())
+	require.Equal(t, gjson.Get(wire, "client_metadata.root_turn_id").String(), gjson.Get(embedded, "root_turn_id").String())
+	nextWire := requestToJSONString(captureConn.writes[1])
+	nextEmbedded := gjson.Get(nextWire, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, "turn", gjson.Get(nextEmbedded, "request_kind").String())
+	require.Equal(t, gjson.Get(nextWire, "client_metadata.turn_id").String(), gjson.Get(nextEmbedded, "turn_id").String())
+	require.NotEqual(t, gjson.Get(embedded, "turn_id").String(), gjson.Get(nextEmbedded, "turn_id").String())
+}

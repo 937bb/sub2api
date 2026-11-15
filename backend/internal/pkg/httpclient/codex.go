@@ -9,9 +9,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 )
 
-// GetCodexClient applies the measured transport to clients using the local CLI
-// identity. Other identities retain the standard client, including its proxy
-// and validation policy. Request headers and endpoint semantics are unchanged.
+// GetCodexClient applies the measured transport to clients using the bundled
+// Codex native engine identity, including Codex Desktop. Other identities retain
+// the standard client, including its proxy and validation policy. Request
+// headers and endpoint semantics are unchanged.
 func GetCodexClient(opts Options, userAgent string) (*http.Client, error) {
 	if !openai.IsLocalCLIUserAgent(userAgent) {
 		return GetClient(opts)

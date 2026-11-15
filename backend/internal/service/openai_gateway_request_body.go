@@ -915,7 +915,7 @@ func resolveOpenAICompactSessionID(c *gin.Context) string {
 			}
 		}
 	}
-	return uuid.NewString()
+	return uuid.Must(uuid.NewV7()).String()
 }
 
 // openAIResponsesRequestPathSuffix 返回可拼接到上游 /responses URL 后面的子路径。

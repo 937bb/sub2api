@@ -1,9 +1,20 @@
 package service
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+)
 
 func (s *OpenAIGatewayService) SetPluginManager(manager *PluginManager) {
 	s.pluginManager = manager
+}
+
+func openAICodexHTTPProfile(account *Account) *tlsfingerprint.Profile {
+	if account == nil || !account.IsOpenAIOAuthLike() {
+		return nil
+	}
+	return tlsfingerprint.CodexHTTPProfile()
 }
 
 // doOpenAIUpstream resolves the account route once for WS, plugin and HTTP.
@@ -23,6 +34,9 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 				return response, err
 			}
 		}
+		if profile := openAICodexHTTPProfile(account); profile != nil {
+			return s.httpUpstream.DoWithTLS(req, route, account.ID, account.Concurrency, profile)
+		}
 		return s.httpUpstream.Do(req, route, account.ID, account.Concurrency)
 	})
 }
@@ -38,7 +52,10 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(request *http.Request, 
 				return response, err
 			}
 		}
-		if useTLSFallback {
+		if profile := openAICodexHTTPProfile(account); profile != nil {
+			return s.httpUpstream.DoWithTLS(req, route, account.ID, account.Concurrency, profile)
+		}
+		if useTLSFallback && s.tlsFPProfileService != nil {
 			return s.httpUpstream.DoWithTLS(req, route, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
 		}
 		return s.httpUpstream.Do(req, route, account.ID, account.Concurrency)

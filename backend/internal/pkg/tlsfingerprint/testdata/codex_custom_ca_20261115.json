@@ -1,0 +1,84 @@
+{
+  "record_version": "0301",
+  "legacy_version": "0303",
+  "cipher_suites": [
+    4866,
+    4865,
+    4867,
+    49196,
+    49195,
+    52393,
+    49200,
+    49199,
+    52392,
+    255
+  ],
+  "extensions": [
+    23,
+    13,
+    0,
+    51,
+    35,
+    43,
+    10,
+    5,
+    45,
+    11,
+    16
+  ],
+  "details": {
+    "10": [
+      4588,
+      29,
+      23,
+      24
+    ],
+    "13": [
+      1283,
+      1027,
+      1539,
+      2055,
+      2054,
+      2053,
+      2052,
+      1537,
+      1281,
+      1025,
+      2308,
+      2309,
+      2310
+    ],
+    "5": "0100000000",
+    "11": "0100",
+    "23": "",
+    "35": "",
+    "45": "0101",
+    "43": [
+      772,
+      771
+    ],
+    "key_shares": [
+      [
+        4588,
+        1216
+      ],
+      [
+        29,
+        32
+      ]
+    ],
+    "alpn": [
+      "h2",
+      "http/1.1"
+    ]
+  },
+  "mode": "custom-ca",
+  "cli_exit_code": -9,
+  "native_cli_sha256": "a636331ed87605efc4cf84028ac2884a75363f9d10ead63cffb57ea0016d486e",
+  "source": "Bundled Codex native engine; isolated home, loopback provider, dummy API key",
+  "limits": [
+    "No real OAuth inference",
+    "First ClientHello only",
+    "No TLS session resumption measurement"
+  ]
+}

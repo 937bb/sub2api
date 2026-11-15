@@ -77,8 +77,9 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnState = strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
-	setOpenAIWSTurnMetadata(payload, turnMetadata)
-	applyStagedCodexFingerprintClientMetadata(c, account, payload)
+	setOpenAIWSTurnMetadata(payload, applyCodexOutboundIdentityTurnMetadata(c, account, turnMetadata))
+	normalizeCodexUSLocaleMetadataMap(payload, account)
+	applyOpenAIWSRequestTraceMetadata(payload, c)
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
 	previousResponseIDKind := ClassifyOpenAIPreviousResponseIDKind(previousResponseID)
 	promptCacheKey := strings.TrimSpace(clientPromptCacheKey)
@@ -139,10 +140,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		sessionHash = executionScope
 	}
 	if turnState == "" && stateStore != nil && sessionHash != "" {
-		if savedTurnState, ok := stateStore.GetSessionTurnState(groupID, sessionHash); ok {
+		if savedTurnState, ok := getOwnedOpenAIWSTurnState(c, account, stateStore, groupID, sessionHash); ok {
 			turnState = savedTurnState
 		}
 	}
+	s.applyOpenAICodexTurnStatePayload(c, account, payload, turnState)
+	payloadBytes = -1
 	preferredConnID := ""
 	if stateStore != nil && previousResponseID != "" {
 		if connID, ok := stateStore.GetResponseConn(previousResponseID); ok {
@@ -327,13 +330,17 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		len(handshakeTurnState),
 	)
 	if handshakeTurnState != "" {
+		s.noteOpenAICodexTurnStateProvenance(c, account, handshakeTurnState)
+		turnState = handshakeTurnState
 		if stateStore != nil && sessionHash != "" {
-			stateStore.BindSessionTurnState(groupID, sessionHash, handshakeTurnState, s.openAIWSSessionStickyTTL())
+			s.bindOpenAIWSTurnState(c, account, stateStore, groupID, sessionHash, handshakeTurnState)
 		}
 		if c != nil {
 			c.Header(http.CanonicalHeaderKey(openAIWSTurnStateHeader), handshakeTurnState)
 		}
 	}
+	s.applyOpenAICodexTurnStatePayload(c, account, payload, turnState)
+	payloadBytes = -1
 
 	if err := s.performOpenAIWSGeneratePrewarm(
 		ctx,
@@ -349,6 +356,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, err
 	}
 
+	stampOpenAIWSStreamRequestStartMS(payload, time.Now())
+	payloadBytes = -1
 	if openAIRequestAuditStore() != nil {
 		auditOpenAIRequest(ctx, c, account, "outbound_ws", payloadAsJSONBytes(payload))
 	}

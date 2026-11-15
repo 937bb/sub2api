@@ -29,6 +29,9 @@ func setOpenAICodexRoutingHint(headers http.Header, account *Account, model stri
 	if account == nil || !account.IsOpenAIOAuthLike() {
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(headers.Get(openAICodexGuardianHeader)), "reviewer") {
+		return
+	}
 
 	model = strings.TrimSpace(model)
 	if model == "" || strings.ContainsAny(model, ";=") {

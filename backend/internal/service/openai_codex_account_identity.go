@@ -9,11 +9,10 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
-
-const codexAccountIdentityNamespaceVersion = "v1"
 
 const codexAccountIdentitySourceContextKey = "openai_codex_account_identity_source"
 
@@ -89,7 +88,7 @@ func codexAccountInstallationID(account *Account) string {
 		return resolveConvergedInstallationID(account, seed)
 	}
 	if namespace := codexAccountIdentityNamespace(account); namespace != "" {
-		return deriveStableUUIDv4("sub2api:codex-account-installation:v1:" + namespace)
+		return deriveStableUUIDv7("sub2api:codex-account-installation:v2:" + namespace)
 	}
 	return ""
 }
@@ -133,14 +132,23 @@ func scopeCodexAccountIdentityValue(account *Account, apiKeyID int64, kind, raw 
 	if raw == "" || namespace == "" {
 		return raw
 	}
-	return deriveStableUUIDv4(fmt.Sprintf(
-		"sub2api:codex-account-identity:%s:user:%d:account:%s:kind:%s:value:%s",
-		codexAccountIdentityNamespaceVersion,
+	scope := fmt.Sprintf(
+		"sub2api:codex-account-identity:v2:user:%d:account:%s",
 		apiKeyID,
 		namespace,
-		kind,
-		raw,
-	))
+	)
+	if kind == "window" {
+		if separator := strings.LastIndexByte(raw, ':'); separator > 0 {
+			base, suffix := raw[:separator], raw[separator:]
+			if _, err := uuid.Parse(base); err == nil {
+				return deriveScopedUUIDv7(scope, base) + suffix
+			}
+		}
+	}
+	// The kind is deliberately absent from the derivation. Official Desktop
+	// root requests reuse one UUID for session-id, thread-id and request-id; the
+	// account namespace changes the identity without breaking that relation.
+	return deriveScopedUUIDv7(scope, raw)
 }
 
 var codexAccountIdentityFields = []struct {
@@ -326,6 +334,106 @@ func applyCodexAccountIdentityHeaders(headers http.Header, account *Account, api
 			}
 		}
 	}
+}
+
+// applyCodexOutboundIdentityHeaders applies one complete identity policy.
+// Session/full convergence owns the full namespace. Device mode owns only the
+// installation ID, so the remaining session/thread fields still need account
+// and API-key isolation before the device override is applied.
+func applyCodexOutboundIdentityHeaders(c *gin.Context, account *Account, headers http.Header) {
+	if ids := stagedCodexFingerprintIDs(c, account); ids != nil {
+		if ids.mode == codexFingerprintDevice {
+			applyCodexAccountIdentityHeaders(headers, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+		}
+		applyCodexFingerprintHeaders(headers, ids)
+		return
+	}
+	applyCodexAccountIdentityHeaders(headers, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+}
+
+func applyCodexOutboundIdentityClientMetadataMap(c *gin.Context, account *Account, requestBody map[string]any) bool {
+	if ids := stagedCodexFingerprintIDs(c, account); ids != nil {
+		changed := false
+		if ids.mode == codexFingerprintDevice {
+			changed = applyCodexAccountIdentityClientMetadataMap(requestBody, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+		}
+		return applyCodexFingerprintClientMetadata(requestBody, ids) || changed
+	}
+	return applyCodexAccountIdentityClientMetadataMap(requestBody, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+}
+
+func applyCodexOutboundIdentityClientMetadataRaw(c *gin.Context, account *Account, body []byte) ([]byte, bool, error) {
+	if ids := stagedCodexFingerprintIDs(c, account); ids != nil {
+		if ids.mode == codexFingerprintDevice {
+			next, changed, err := applyCodexAccountIdentityClientMetadataRaw(body, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+			if err != nil {
+				return body, false, err
+			}
+			fingerprinted, fingerprintChanged, fingerprintErr := applyCodexFingerprintClientMetadataRaw(next, ids)
+			return fingerprinted, changed || fingerprintChanged, fingerprintErr
+		}
+		return applyCodexFingerprintClientMetadataRaw(body, ids)
+	}
+	return applyCodexAccountIdentityClientMetadataRaw(body, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+}
+
+// stageCodexOutboundIdentityForExistingMetadata enables configured fingerprint
+// convergence only for a request that already carries a Desktop metadata
+// envelope. Compatibility bridges must not invent Desktop identity for plain
+// Chat Completions or Anthropic clients.
+func stageCodexOutboundIdentityForExistingMetadata(c *gin.Context, account *Account, requestBody map[string]any) {
+	stageCodexFingerprintIDs(c, nil)
+	if requestBody == nil {
+		return
+	}
+	switch requestBody["client_metadata"].(type) {
+	case map[string]any:
+		// Existing Desktop envelope: fingerprint convergence may normalize it.
+	default:
+		return
+	}
+	var clientHeaders http.Header
+	if c != nil && c.Request != nil {
+		clientHeaders = c.Request.Header
+	}
+	stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttempt(c, account, clientHeaders))
+}
+
+// applyCodexOutboundIdentityTurnMetadata scopes one metadata blob without
+// touching an already-normalized request body. HTTP -> WS forwarding uses this
+// when the body omitted metadata and the handshake header supplies it later.
+func applyCodexOutboundIdentityTurnMetadata(c *gin.Context, account *Account, raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	metadata := map[string]any{}
+	if err := decodeCodexIdentityMetadata(raw, &metadata); err != nil || metadata == nil {
+		return raw
+	}
+	if ids := stagedCodexFingerprintIDs(c, account); ids != nil {
+		if ids.mode == codexFingerprintDevice {
+			applyCodexAccountIdentityFields(metadata, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+			metadata["installation_id"] = ids.installationID
+		} else {
+			rewriteCodexFingerprintLinkedFields(metadata, ids)
+			replaceCodexTurnMetadataFields(metadata, map[string]any{
+				"installation_id":         ids.installationID,
+				"session_id":              ids.sessionID,
+				"thread_id":               ids.threadID,
+				"turn_id":                 ids.turnID,
+				"window_id":               ids.windowID,
+				"turn_started_at_unix_ms": ids.turnStartedAtUnixMs,
+			})
+		}
+	} else {
+		applyCodexAccountIdentityFields(metadata, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
+	}
+	rebuilt, err := marshalCodexTurnMetadata(metadata)
+	if err != nil {
+		return raw
+	}
+	return string(rebuilt)
 }
 
 // Preserve opaque numeric metadata while rewriting only known identity fields.

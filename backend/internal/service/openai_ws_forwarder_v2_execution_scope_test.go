@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 // 场景：codex 子智能体经 HTTP 入站、网关内部走 WS 池转发时，与父线程共用 session_id 头。
@@ -129,7 +130,8 @@ func TestOpenAIGatewayService_Forward_WSv2_ExecutionScopeUsesOriginalIdentity(t 
 	handshake := http.Header{}
 	handshake.Set(openAIWSTurnStateHeader, "turn-state-from-upstream")
 	pool := newOpenAIWSConnPool(cfg)
-	pool.setClientDialerForTest(&openAIWSCaptureDialer{conn: captureConn, handshake: handshake})
+	captureDialer := &openAIWSCaptureDialer{conn: captureConn, handshake: handshake}
+	pool.setClientDialerForTest(captureDialer)
 	defer pool.Close()
 
 	stateStore := NewOpenAIWSStateStore(nil)
@@ -198,4 +200,9 @@ func TestOpenAIGatewayService_Forward_WSv2_ExecutionScopeUsesOriginalIdentity(t 
 	require.Equal(t, "child-thread", threadC)
 	_, boundC := stateStore.GetSessionTurnState(groupID, scopeC)
 	require.True(t, boundC, "客户端自带线程标识时，键必须与按原始报文算出的一致，不受账号 namespace 改写影响")
+	require.Empty(t, captureDialer.lastHeaders.Get(openAIWSTurnStateHeader), "Codex WS 握手不应发送 turn state")
+	require.Len(t, captureConn.writes, 3)
+	for _, write := range captureConn.writes {
+		require.Equal(t, "turn-state-from-upstream", gjson.Get(requestToJSONString(write), "client_metadata."+openAIWSTurnStateHeader).String())
+	}
 }

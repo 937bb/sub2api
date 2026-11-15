@@ -33,8 +33,17 @@ const (
 
 // resolveOpenAIWSClientThreadID 提取 codex 客户端的线程标识。codex 多智能体会话里
 // 父线程与全部子智能体共用同一个 session-id 头，只有线程标识能把它们区分开。
-// 优先级：thread-id 头 → x-codex-turn-metadata 头 → x-codex-window-id 头 → 请求体 client_metadata。
+// WS 已升级连接优先采用当前帧的线程；HTTP 保持 thread-id 头 →
+// x-codex-turn-metadata 头 → x-codex-window-id 头 → 请求体 client_metadata。
 func resolveOpenAIWSClientThreadID(c *gin.Context, body []byte) string {
+	if isOpenAIWSFrameContext(c) {
+		if id := strings.TrimSpace(gjson.GetBytes(body, "client_metadata.thread_id").String()); id != "" {
+			return id
+		}
+		if id := codexTurnMetadataThreadID(gjson.GetBytes(body, "client_metadata."+openAIWSTurnMetadataHeader).String()); id != "" {
+			return id
+		}
+	}
 	if c != nil && c.Request != nil {
 		if id := strings.TrimSpace(c.GetHeader(openAIWSThreadIDHeader)); id != "" {
 			return id
@@ -82,9 +91,16 @@ func codexTurnMetadataThreadID(raw string) string {
 	return metadata.ThreadID
 }
 
-// openAIWSExecutionTurnMetadata 取本次连接的 turn 元数据：x-codex-turn-metadata 头优先，
-// 其次请求体 client_metadata 内嵌的同名 JSON（Desktop 走 HTTP 时只有后者）。
+// openAIWSExecutionTurnMetadata 在 WS 中优先读取当前帧，避免沿用握手预热
+// 的请求类型；HTTP 保持头优先，再回退请求体中的同名 JSON。
 func openAIWSExecutionTurnMetadata(c *gin.Context, body []byte) codexTurnMetadata {
+	if isOpenAIWSFrameContext(c) {
+		field := gjson.GetBytes(body, "client_metadata."+openAIWSTurnMetadataHeader)
+		if field.Exists() {
+			metadata, _ := parseCodexTurnMetadata(field.String())
+			return metadata
+		}
+	}
 	if c != nil && c.Request != nil {
 		if metadata, ok := parseCodexTurnMetadata(c.GetHeader(openAIWSTurnMetadataHeader)); ok {
 			return metadata
@@ -153,4 +169,25 @@ func resolveOpenAIWSExecutionScope(c *gin.Context, body []byte, apiKeyID int64) 
 		return scope, ""
 	}
 	return "", ""
+}
+
+// Only upgraded WebSocket requests use per-frame precedence; HTTP retains its
+// existing header semantics. A frame may intentionally carry an empty value.
+func isOpenAIWSFrameContext(c *gin.Context) bool {
+	return c != nil && c.Request != nil && strings.EqualFold(strings.TrimSpace(c.GetHeader("Upgrade")), "websocket")
+}
+func openAIWSFrameTurnMetadata(c *gin.Context, body []byte) string {
+	if isOpenAIWSFrameContext(c) {
+		value := gjson.GetBytes(body, "client_metadata."+openAIWSTurnMetadataHeader)
+		if value.Exists() {
+			if value.Type == gjson.String {
+				return value.String()
+			}
+			return ""
+		}
+	}
+	if c == nil {
+		return ""
+	}
+	return c.GetHeader(openAIWSTurnMetadataHeader)
 }

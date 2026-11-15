@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
@@ -89,6 +90,22 @@ func TestCodexAccountIdentityNamespaceUsesStableCredentialSource(t *testing.T) {
 	require.NotEqual(t, setupNamespace, codexAccountIdentityNamespace(setupTokenB))
 }
 
+func TestCodexAccountIdentityScopingPreservesDesktopRootRelations(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "account-root"}}
+	root := "019a7df0-7c00-7000-8000-000000000123"
+	session := scopeCodexAccountIdentityValue(account, 77, "session", root)
+	thread := scopeCodexAccountIdentityValue(account, 77, "thread", root)
+	request := scopeCodexAccountIdentityValue(account, 77, "request", root)
+	window := scopeCodexAccountIdentityValue(account, 77, "window", root+":0")
+	require.Equal(t, session, thread)
+	require.Equal(t, session, request)
+	require.Equal(t, session+":0", window)
+	parsed, err := uuid.Parse(session)
+	require.NoError(t, err)
+	require.Equal(t, uuid.Version(7), parsed.Version())
+	require.Equal(t, stableCodexUUIDV7Timestamp(root), stableCodexUUIDV7Timestamp(session))
+}
+
 func TestCodexAccountIdentitySourceResolvesShadowAndOverwritesFailoverContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -114,7 +131,7 @@ func TestCodexAccountIdentitySourceResolvesShadowAndOverwritesFailoverContext(t 
 		"token", true, "client-session", true,
 	)
 	require.NoError(t, err)
-	require.Equal(t, isolateOpenAIUpstreamSessionID(0, parent, "client-session"), req.Header.Get("session_id"))
+	require.Empty(t, req.Header.Get("session_id"))
 
 	next := &Account{ID: 19, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{
 		"chatgpt_account_id": "other-account",
@@ -153,7 +170,9 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 	first := build(account11)
 	firstAgain := build(account11)
 	second := build(account19)
-	for _, header := range []string{"session_id", "x-codex-installation-id", "thread-id", "x-codex-window-id", "x-client-request-id"} {
+	require.Empty(t, first.Get("session_id"))
+	require.Empty(t, first.Get("x-codex-installation-id"))
+	for _, header := range []string{"thread-id", "x-codex-window-id", "x-client-request-id"} {
 		require.NotEmpty(t, first.Get(header), header)
 		require.Equal(t, first.Get(header), firstAgain.Get(header), header)
 		require.NotEqual(t, first.Get(header), second.Get(header), header)
@@ -166,7 +185,8 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 	)
 	require.NoError(t, err)
 	require.Equal(t, first.Get("thread-id"), httpRequest.Header.Get("thread-id"), "HTTP and WS must preserve the same scoped thread")
-	require.Equal(t, httpRequest.Header.Get("session_id"), first.Get("session_id"), "HTTP and WS must derive the same identity from the raw client key")
+	require.Empty(t, httpRequest.Header.Get("session-id"))
+	require.Empty(t, first.Get("session-id"))
 }
 
 func TestBuildUpstreamRequestNamespacesCodexIdentityByOAuthAccount(t *testing.T) {
@@ -208,11 +228,8 @@ func TestBuildUpstreamRequestNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 	second := build(19, "chatgpt-account-19")
 
 	identityHeaders := []string{
-		"x-codex-installation-id",
 		"x-codex-window-id",
 		"session-id",
-		"session_id",
-		"conversation_id",
 		"thread-id",
 		"x-client-request-id",
 		"x-codex-turn-metadata",

@@ -107,7 +107,7 @@ func TestAccountDeviceHeaderAndMetadataParity(t *testing.T) {
 	require.JSONEq(t, `{"input":[]}`, string(raw))
 }
 
-func TestAccountDeviceHTTPAndWSBuildersIncludingPrewarm(t *testing.T) {
+func TestAccountDeviceHTTPAndWSBuildersStripStandaloneInstallationHeader(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	a := accountDeviceFixture(11, "upstream-a")
 	svc := &OpenAIGatewayService{}
@@ -118,11 +118,11 @@ func TestAccountDeviceHTTPAndWSBuildersIncludingPrewarm(t *testing.T) {
 		c.Request.Header.Set("x-codex-installation-id", uuid.NewString())
 		req, err := svc.buildUpstreamRequest(context.Background(), c, a, []byte(`{"input":[]}`), "token", true, "session", true)
 		require.NoError(t, err)
-		require.Equal(t, codexAccountInstallationID(a), req.Header.Get("x-codex-installation-id"))
+		require.Empty(t, req.Header.Get("x-codex-installation-id"))
 		for _, ctx := range []*gin.Context{c, nil} {
 			h, _, err := svc.buildOpenAIWSHeaders(context.Background(), ctx, a, "token", OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, true, "", "", "", "", "")
 			require.NoError(t, err)
-			require.Equal(t, req.Header.Get("x-codex-installation-id"), h.Get("x-codex-installation-id"))
+			require.Empty(t, h.Get("x-codex-installation-id"))
 		}
 	}
 }

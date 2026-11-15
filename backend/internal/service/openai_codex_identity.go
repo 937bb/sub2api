@@ -29,7 +29,8 @@ func NormalizeCodexClientVersion(version string) string {
 	return version
 }
 
-// buildCodexCLIUserAgent uses the shared CLI profile.
+// buildCodexCLIUserAgent keeps its historical name but now rebuilds the shared
+// canonical Desktop profile.
 func buildCodexCLIUserAgent(version string) string {
 	if version = NormalizeCodexClientVersion(version); version == "" {
 		return codexCLIUserAgent
@@ -125,7 +126,7 @@ func resolveCodexOutboundIdentity(candidateUA string) codexOutboundIdentity {
 	originator, pairedUA, ok := openai.PairCodexClientIdentity(ua)
 	if !ok {
 		if originator, pairedUA, ok = openai.PairCodexClientIdentity(canonical); !ok {
-			originator, pairedUA = openai.CodexCLIOriginator, codexCLIUserAgent
+			originator, pairedUA = openai.CodexDesktopOriginator, codexCLIUserAgent
 		}
 	}
 	// Preserve the production TUI-to-CLI compatibility normalization.
@@ -174,7 +175,7 @@ func applyOpenAICodexProbeHeaders(h http.Header) {
 	}
 	ensureCodexIdentityHeaders(h)
 	enforceCodexIdentityHeaders(h)
-	h.Set("X-Codex-Window-ID", uuid.NewString())
+	h.Set("X-Codex-Window-ID", uuid.Must(uuid.NewV7()).String())
 }
 
 // enforceCodexIdentityHeaders finalizes identity without an account override.
@@ -198,6 +199,31 @@ func enforceCodexIdentityHeadersWithUA(h http.Header, overrideUA string) {
 	setCodexIdentityHeader(h, "user-agent", identity.userAgent)
 	setCodexIdentityHeader(h, "originator", identity.originator)
 	setCodexIdentityHeader(h, "version", identity.version)
+}
+
+// finalizeCodexDesktopInferenceHeaders removes headers that the bundled Desktop
+// engine does not emit on standard Responses HTTP or WebSocket requests. Compact
+// keeps its unary compatibility fields. OAI-Product-Sku belongs to Electron
+// ChatGPT helpers; it is absent from the native inference engine and must not be
+// synthesized here.
+func finalizeCodexDesktopInferenceHeaders(h http.Header, compact bool) {
+	if h == nil {
+		return
+	}
+	identity, _, ok := openai.PairCodexClientIdentity(codexIdentityHeaderValue(h, "user-agent"))
+	if !ok || !openai.IsCodexDesktopOriginator(identity) {
+		return
+	}
+	deleteOpenAIHeaderEqualFold(h, "oai-product-sku")
+	deleteOpenAIHeaderEqualFold(h, "accept-language")
+	deleteOpenAIHeaderEqualFold(h, "x-codex-installation-id")
+	deleteOpenAIHeaderEqualFold(h, "thread_id")
+	if compact {
+		return
+	}
+	deleteOpenAIHeaderEqualFold(h, "version")
+	deleteOpenAIHeaderEqualFold(h, "session_id")
+	deleteOpenAIHeaderEqualFold(h, "conversation_id")
 }
 
 // pairCodexIdentityHeaders preserves the client profile but repairs the entire version pair.

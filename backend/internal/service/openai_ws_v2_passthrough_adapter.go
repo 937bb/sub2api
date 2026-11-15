@@ -763,12 +763,22 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			firstClientMessage = aliasedBody
 		}
 	}
-	accountScopedFirst, accountScoped, scopeErr := applyCodexAccountIdentityClientMetadataRaw(firstClientMessage, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
-	if scopeErr != nil {
-		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", scopeErr)
+	guardedFirstMessage, stateErr := s.guardOpenAICodexTurnStateBody(c, account, firstClientMessage)
+	if stateErr != nil {
+		return stateErr
 	}
-	if accountScoped {
-		firstClientMessage = accountScopedFirst
+	firstClientMessage = guardedFirstMessage
+	var clientHeaders http.Header
+	if c != nil && c.Request != nil {
+		clientHeaders = c.Request.Header
+	}
+	stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttempt(c, account, clientHeaders))
+	identityFirst, identityChanged, identityErr := applyCodexOutboundIdentityClientMetadataRaw(c, account, firstClientMessage)
+	if identityErr != nil {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", identityErr)
+	}
+	if identityChanged {
+		firstClientMessage = identityFirst
 	}
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
@@ -919,6 +929,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		openAIWSHeaderValueForLog(handshakeHeaders, "x-request-id"),
 	)
 
+	if handshakeTurnState := extractOpenAICodexTurnState(handshakeHeaders); handshakeTurnState != "" {
+		s.noteOpenAICodexTurnStateProvenance(c, account, handshakeTurnState)
+		turnState = handshakeTurnState
+	}
 	upstreamFrameConn, ok := upstreamConn.(openaiwsv2.FrameConn)
 	if !ok {
 		return errors.New("openai ws passthrough upstream connection does not support frame relay")
@@ -1018,12 +1032,30 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 			}
 			if isResponseCreate || eventType == "session.update" {
-				accountScopedPayload, accountScoped, scopeErr := applyCodexAccountIdentityClientMetadataRaw(payload, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
-				if scopeErr != nil {
-					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", scopeErr)
+				guarded, stateErr := s.guardOpenAICodexTurnStateBody(c, account, payload)
+				if stateErr != nil {
+					return payload, nil, stateErr
 				}
-				if accountScoped {
-					payload = accountScopedPayload
+				payload = guarded
+				if isResponseCreate {
+					payload, stateErr = s.applyOpenAICodexTurnStateBody(c, account, payload, turnState)
+					if stateErr != nil {
+						return payload, nil, stateErr
+					}
+				}
+				if isResponseCreate || gjson.GetBytes(payload, "client_metadata").IsObject() {
+					var frameHeaders http.Header
+					if c != nil && c.Request != nil {
+						frameHeaders = c.Request.Header
+					}
+					stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttempt(c, account, frameHeaders))
+					identityPayload, identityChanged, identityErr := applyCodexOutboundIdentityClientMetadataRaw(c, account, payload)
+					if identityErr != nil {
+						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", identityErr)
+					}
+					if identityChanged {
+						payload = identityPayload
+					}
 				}
 			}
 			if isResponseCreate {
@@ -1117,6 +1149,16 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)
 				SetOpsUpstreamModel(c, actualModel)
+				tracePayload, _, traceErr := applyOpenAIWSRequestTraceMetadataRaw(out, c)
+				if traceErr != nil {
+					return out, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket trace metadata", traceErr)
+				}
+				out = tracePayload
+				stampedPayload, _, stampErr := stampOpenAIWSStreamRequestStartMSRaw(out, time.Now())
+				if stampErr != nil {
+					return out, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request timestamp metadata", stampErr)
+				}
+				out = stampedPayload
 				responseCreateAtCopy := responseCreateAt
 				acceptedTurnStartedAt.Store(&responseCreateAtCopy)
 				acceptedTurn = true
@@ -1138,6 +1180,23 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		},
 	}
 	upstreamFirstMessageSent := false
+	if strings.TrimSpace(gjson.GetBytes(firstClientMessage, "type").String()) == "response.create" {
+		statePayload, stateErr := s.applyOpenAICodexTurnStateBody(c, account, firstClientMessage, turnState)
+		if stateErr != nil {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket turn state metadata", stateErr)
+		}
+		firstClientMessage = statePayload
+		tracePayload, _, traceErr := applyOpenAIWSRequestTraceMetadataRaw(firstClientMessage, c)
+		if traceErr != nil {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket trace metadata", traceErr)
+		}
+		firstClientMessage = tracePayload
+		stampedPayload, _, stampErr := stampOpenAIWSStreamRequestStartMSRaw(firstClientMessage, time.Now())
+		if stampErr != nil {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request timestamp metadata", stampErr)
+		}
+		firstClientMessage = stampedPayload
+	}
 	firstWriteCtx, cancelFirstWrite := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
 	firstWriteErr := relayUpstreamFrameConn.WriteFrame(firstWriteCtx, coderws.MessageText, firstClientMessage)
 	cancelFirstWrite()

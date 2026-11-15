@@ -19,6 +19,12 @@ const (
 
 	openAIWSTurnStateHeader    = "x-codex-turn-state"
 	openAIWSTurnMetadataHeader = "x-codex-turn-metadata"
+	// Codex Desktop carries inbound W3C trace context in response.create's
+	// client_metadata for WebSocket requests. These are frame keys, not
+	// handshake headers.
+	openAIWSRequestTraceparentMetadataKey   = "ws_request_header_traceparent"
+	openAIWSRequestTracestateMetadataKey    = "ws_request_header_tracestate"
+	openAIWSStreamRequestStartMSMetadataKey = "x-codex-ws-stream-request-start-ms"
 
 	openAIWSLogValueMaxLen      = 160
 	openAIWSHeaderValueMaxLen   = 120

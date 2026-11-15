@@ -7,14 +7,24 @@ import (
 )
 
 func TestDesktopIdentityPreservesApplicationVersion(t *testing.T) {
-	observed := "Codex Desktop/0.166.0-alpha.6 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.1029.61003)"
+	observed := "Codex Desktop/0.167.0-alpha.3.2 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.1103.31037)"
 	require.Equal(t, observed, CodexDesktopOriginator+"/"+CodexDesktopEngineVersion+CodexDesktopUserAgentSuffix)
 	originator, paired, ok := PairCodexClientIdentity(observed)
 	require.True(t, ok)
 	require.Equal(t, "Codex Desktop", originator)
 	require.Equal(t, observed, paired)
-	require.Equal(t, "0.166.0-alpha.6", CodexUserAgentVersion(observed))
-	require.Equal(t, "Codex Desktop/0.200.1 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.1029.61003)", SetCodexUserAgentVersion(observed, "0.200.1"))
+	require.Equal(t, "0.167.0-alpha.3.2", CodexUserAgentVersion(observed))
+	require.Equal(t, "Codex Desktop/0.200.1 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.1103.31037)", SetCodexUserAgentVersion(observed, "0.200.1"))
+}
+
+func TestDesktopWorkIdentityUsesNativeDesktopProfile(t *testing.T) {
+	observed := CodexWorkDesktopOriginator + "/" + CodexDesktopEngineVersion + CodexDesktopUserAgentSuffix
+	originator, paired, ok := PairCodexClientIdentity(observed)
+	require.True(t, ok)
+	require.Equal(t, CodexWorkDesktopOriginator, originator)
+	require.Equal(t, observed, paired)
+	require.True(t, IsCodexDesktopOriginator(originator))
+	require.True(t, IsLocalCLIUserAgent(observed))
 }
 
 func TestEngineRewriteDoesNotChangeIndependentClientVersions(t *testing.T) {

@@ -37,6 +37,13 @@ func TestPairCodexClientIdentity(t *testing.T) {
 			wantOK:         true,
 		},
 		{
+			name:           "Desktop Work executor 精确配对",
+			ua:             "codex_work_desktop/0.167.0-alpha.3.2 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.1103.31037)",
+			wantOriginator: "codex_work_desktop",
+			wantUA:         "codex_work_desktop/0.167.0-alpha.3.2 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.1103.31037)",
+			wantOK:         true,
+		},
+		{
 			name:           "originator override 用尾部 name 重写首段",
 			ua:             "cccc/0.142.0 (Ubuntu 22.4.0; x86_64) screen (codex-tui; 0.142.0)",
 			wantOriginator: "codex-tui",

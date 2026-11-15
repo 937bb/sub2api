@@ -320,7 +320,16 @@ func TestOpenAIResponsesWebSocketV2PassthroughNonCyberTurnAllowsFollowup(t *test
 	}
 	select {
 	case second := <-secondUpstreamFrame:
-		require.JSONEq(t, secondPayload, string(second))
+		frame := gjson.ParseBytes(second)
+		require.Len(t, frame.Map(), 5)
+		require.Equal(t, "response.create", frame.Get("type").String())
+		require.Equal(t, "gpt-5.1", frame.Get("model").String())
+		require.Equal(t, "non-cyber-session-1", frame.Get("prompt_cache_key").String())
+		require.Equal(t, "follow-up", frame.Get("input").String())
+		metadata := frame.Get("client_metadata")
+		require.True(t, metadata.IsObject())
+		require.Len(t, metadata.Map(), 1)
+		require.Regexp(t, `^[0-9]{13}$`, metadata.Get("x-codex-ws-stream-request-start-ms").String())
 	default:
 		t.Fatal("non-cyber follow-up did not reach upstream")
 	}

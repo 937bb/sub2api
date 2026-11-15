@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const testCodexFingerprintSeed = "11111111-1111-4111-8111-111111111111"
+const testCodexFingerprintSeed = "019a7df0-7c00-7000-8000-000000000001"
 
 func newTestOAuthAccount(id int64, extra map[string]any) *Account {
 	if codexFingerprintModeRequiresSeed(codexFingerprintModeFromExtra(extra)) {
@@ -32,26 +32,32 @@ func newTestOAuthAccount(id int64, extra map[string]any) *Account {
 	}
 }
 
-// --- deriveStableUUIDv4 ---
+// --- deriveStableUUIDv7 ---
 
-func TestDeriveStableUUIDv4_Deterministic(t *testing.T) {
-	a := deriveStableUUIDv4("test-seed-1")
-	b := deriveStableUUIDv4("test-seed-1")
+func TestDeriveStableUUIDv7_Deterministic(t *testing.T) {
+	a := deriveStableUUIDv7("test-seed-1")
+	b := deriveStableUUIDv7("test-seed-1")
 	assert.Equal(t, a, b, "同一种子应返回相同结果")
 }
 
-func TestDeriveStableUUIDv4_DifferentSeeds(t *testing.T) {
-	a := deriveStableUUIDv4("seed-a")
-	b := deriveStableUUIDv4("seed-b")
+func TestDeriveStableUUIDv7_DifferentSeeds(t *testing.T) {
+	a := deriveStableUUIDv7("seed-a")
+	b := deriveStableUUIDv7("seed-b")
 	assert.NotEqual(t, a, b, "不同种子应返回不同结果")
 }
 
-func TestDeriveStableUUIDv4_ValidFormat(t *testing.T) {
-	result := deriveStableUUIDv4("test-seed")
+func TestDeriveStableUUIDv7_ValidFormat(t *testing.T) {
+	result := deriveStableUUIDv7("test-seed")
 	parsed, err := uuid.Parse(result)
 	require.NoError(t, err, "应返回合法 UUID 格式")
-	assert.Equal(t, uuid.Version(4), parsed.Version(), "应为 UUIDv4")
+	assert.Equal(t, uuid.Version(7), parsed.Version(), "应为 UUIDv7")
 	assert.Equal(t, uuid.RFC4122, parsed.Variant(), "应为 RFC4122 变体")
+}
+
+func TestDeriveScopedUUIDv7_PreservesSourceTimestamp(t *testing.T) {
+	source := "019a7df0-7c00-7000-8000-000000000001"
+	result := deriveScopedUUIDv7("account-scope", source)
+	require.Equal(t, stableCodexUUIDV7Timestamp(source), stableCodexUUIDV7Timestamp(result))
 }
 
 // --- GetCodexFingerprintMode ---
@@ -231,21 +237,20 @@ func TestApplyCodexFingerprintHeaders_SessionMode(t *testing.T) {
 	seed, ok := codexFingerprintSeed(account.Extra)
 	require.True(t, ok)
 	convergedInstall := resolveConvergedInstallationID(account, seed)
-	convergedSession := resolveConvergedSessionID(seed)
-	convergedThread := resolveConvergedThreadID(seed, "client-session-aaa")
+	convergedSession := resolveConvergedThreadID(seed, "client-session-aaa")
 
 	assert.Equal(t, convergedInstall, h.Get("x-codex-installation-id"))
 	assert.Equal(t, convergedSession, h.Get("session-id"))
 	assert.Equal(t, convergedSession, h.Get("session_id"), "下划线形式也应被改写")
-	assert.Equal(t, convergedThread, h.Get("thread-id"))
-	assert.Equal(t, convergedThread, h.Get("x-client-request-id"))
-	assert.Equal(t, convergedThread+":0", h.Get("x-codex-window-id"))
+	assert.Equal(t, convergedSession, h.Get("thread-id"))
+	assert.Equal(t, convergedSession, h.Get("x-client-request-id"))
+	assert.Equal(t, convergedSession+":0", h.Get("x-codex-window-id"))
 
 	var meta map[string]any
 	require.NoError(t, json.Unmarshal([]byte(h.Get("x-codex-turn-metadata")), &meta))
 	assert.Equal(t, convergedInstall, meta["installation_id"])
 	assert.Equal(t, convergedSession, meta["session_id"])
-	assert.Equal(t, convergedThread, meta["thread_id"])
+	assert.Equal(t, convergedSession, meta["thread_id"])
 	assert.NotEqual(t, "user-turn", meta["turn_id"], "turn_id 应被新生成的值替换")
 	assert.Equal(t, "seccomp", meta["sandbox"], "sandbox 保留原样")
 	assert.Equal(t, "user", meta["thread_source"], "thread_source 保留原样")
@@ -276,10 +281,15 @@ func TestApplyCodexFingerprintHeaders_SessionMode_DifferentClients(t *testing.T)
 	hB.Set("x-codex-turn-metadata", makeTurnMeta())
 	applyCodexFingerprintHeaders(hB, idsB)
 
-	assert.Equal(t, hA.Get("session-id"), hB.Get("session-id"), "session_id 应相同")
+	assert.NotEqual(t, hA.Get("session-id"), hB.Get("session-id"), "不同客户端 session_id 应不同")
 	assert.NotEqual(t, hA.Get("thread-id"), hB.Get("thread-id"), "不同客户端 thread_id 应不同")
 	assert.NotEqual(t, hA.Get("x-codex-window-id"), hB.Get("x-codex-window-id"), "不同客户端 window_id 应不同")
 	assert.Equal(t, hA.Get("x-codex-installation-id"), hB.Get("x-codex-installation-id"))
+	for _, h := range []http.Header{hA, hB} {
+		assert.Equal(t, h.Get("session-id"), h.Get("thread-id"))
+		assert.Equal(t, h.Get("session-id"), h.Get("x-client-request-id"))
+		assert.Equal(t, h.Get("session-id")+":0", h.Get("x-codex-window-id"))
+	}
 }
 
 // --- full 模式 ---
@@ -471,8 +481,8 @@ func TestApplyCodexFingerprintClientMetadata_SessionMode(t *testing.T) {
 	seed, ok := codexFingerprintSeed(account.Extra)
 	require.True(t, ok)
 	convergedInstall := resolveConvergedInstallationID(account, seed)
-	convergedSession := resolveConvergedSessionID(seed)
-	convergedThread := resolveConvergedThreadID(seed, "client-session-aaa")
+	convergedSession := resolveConvergedThreadID(seed, "client-session-aaa")
+	convergedThread := convergedSession
 
 	assert.Equal(t, convergedInstall, cm["x-codex-installation-id"])
 	assert.Equal(t, convergedSession, cm["session_id"])
@@ -882,8 +892,9 @@ func TestBuildUpstreamRequestOpenAIPassthrough_AppliesStagedFingerprint(t *testi
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "test-token")
 	require.NoError(t, err)
 
-	assert.Equal(t, ids.sessionID, req.Header.Get("session_id"), "session 模式下出站 session_id 应为账号级收敛值")
-	assert.Equal(t, ids.installationID, req.Header.Get("x-codex-installation-id"))
+	assert.Empty(t, req.Header.Get("session_id"), "Desktop 标准推理不发送下划线 session_id")
+	assert.Empty(t, req.Header.Get("x-codex-installation-id"), "installation 只存在于 metadata，不作为独立头")
+	assert.Equal(t, ids.sessionID, req.Header.Get("session-id"), "session 模式下出站 session-id 应为账号级收敛值")
 	assert.Equal(t, ids.windowID, req.Header.Get("x-codex-window-id"))
 	assert.Equal(t, ids.threadID, req.Header.Get("x-client-request-id"))
 	turnMetadata := req.Header.Get("x-codex-turn-metadata")
@@ -911,8 +922,8 @@ func TestBuildUpstreamRequestOpenAIPassthrough_OffModeKeepsIsolatedSession(t *te
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "test-token")
 	require.NoError(t, err)
 
-	assert.NotEmpty(t, req.Header.Get("session_id"))
-	assert.NotEqual(t, resolveConvergedSessionID(testCodexFingerprintSeed), req.Header.Get("session_id"), "off 模式不得收敛 session_id")
+	assert.Empty(t, req.Header.Get("session_id"))
+	assert.Empty(t, req.Header.Get("session-id"), "off 模式不得凭空生成 Desktop session-id")
 	assert.Empty(t, req.Header.Get("x-codex-window-id"))
 }
 

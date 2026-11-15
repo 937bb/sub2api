@@ -33,10 +33,10 @@ const (
 	openaiPlatformAPIURL            = "https://api.openai.com/v1/responses"
 	openaiPlatformAPIInputTokensURL = "https://api.openai.com/v1/responses/input_tokens"
 	openaiStickySessionTTL          = time.Hour // Sticky session TTL
-	// Retain the gateway CLI platform preset; administrators can override it.
-	codexCLIUserAgentSuffix = openai.CodexLocalCLIPlatform
-	// This fallback and the version header share the same engine version.
-	codexCLIUserAgent = openai.CodexDefaultOriginator + "/" + codexCLIVersion + codexCLIUserAgentSuffix + " (codex_exec; " + codexCLIVersion + ")"
+	// The canonical gateway profile follows the locally inspected Desktop host.
+	// The historical symbol names remain to avoid broad downstream churn.
+	codexCLIUserAgentSuffix = openai.CodexDesktopUserAgentSuffix
+	codexCLIUserAgent       = openai.CodexDesktopOriginator + "/" + codexCLIVersion + codexCLIUserAgentSuffix
 	// Maximum diagnostic header length for official-client rejections.
 	codexCLIOnlyHeaderValueMaxBytes = 256
 
@@ -61,50 +61,62 @@ const (
 
 // OpenAI allowed headers whitelist (for non-passthrough).
 var openaiAllowedHeaders = map[string]bool{
-	codexParentThreadIDHeader: true,
-	openAISubagentHeader:      true,
-	"accept-language":         true,
-	"content-type":            true,
-	"conversation_id":         true,
-	"openai-beta":             true,
-	"user-agent":              true,
-	"originator":              true,
-	"session_id":              true,
-	"session-id":              true,
-	"thread-id":               true,
-	"thread_id":               true,
-	"x-client-request-id":     true,
-	"x-codex-beta-features":   true,
-	"x-codex-installation-id": true,
-	"x-codex-turn-state":      true,
-	"x-codex-turn-metadata":   true,
-	"x-codex-window-id":       true,
-	responsesLiteHeaderKey:    true,
+	codexParentThreadIDHeader:          true,
+	openAISubagentHeader:               true,
+	openAIMemgenRequestHeader:          true,
+	openAICodexGuardianHeader:          true,
+	openAIResponsesTimingMetricsHeader: true,
+	"accept-language":                  true,
+	"baggage":                          true,
+	"content-type":                     true,
+	"conversation_id":                  true,
+	"openai-beta":                      true,
+	"user-agent":                       true,
+	"originator":                       true,
+	"session_id":                       true,
+	"session-id":                       true,
+	"thread-id":                        true,
+	"thread_id":                        true,
+	"traceparent":                      true,
+	"tracestate":                       true,
+	"x-client-request-id":              true,
+	"x-codex-beta-features":            true,
+	"x-codex-installation-id":          true,
+	"x-codex-turn-state":               true,
+	"x-codex-turn-metadata":            true,
+	"x-codex-window-id":                true,
+	responsesLiteHeaderKey:             true,
 }
 
 // OpenAI passthrough allowed headers whitelist.
 // Restrict forwarding to supported protocol and client metadata.
 var openaiPassthroughAllowedHeaders = map[string]bool{
-	codexParentThreadIDHeader: true,
-	openAISubagentHeader:      true,
-	"accept":                  true,
-	"accept-language":         true,
-	"content-type":            true,
-	"conversation_id":         true,
-	"openai-beta":             true,
-	"user-agent":              true,
-	"originator":              true,
-	"session_id":              true,
-	"session-id":              true,
-	"thread-id":               true,
-	"thread_id":               true,
-	"x-client-request-id":     true,
-	"x-codex-beta-features":   true,
-	"x-codex-installation-id": true,
-	"x-codex-turn-state":      true,
-	"x-codex-turn-metadata":   true,
-	"x-codex-window-id":       true,
-	responsesLiteHeaderKey:    true,
+	codexParentThreadIDHeader:          true,
+	openAISubagentHeader:               true,
+	openAIMemgenRequestHeader:          true,
+	openAICodexGuardianHeader:          true,
+	openAIResponsesTimingMetricsHeader: true,
+	"accept":                           true,
+	"accept-language":                  true,
+	"baggage":                          true,
+	"content-type":                     true,
+	"conversation_id":                  true,
+	"openai-beta":                      true,
+	"user-agent":                       true,
+	"originator":                       true,
+	"session_id":                       true,
+	"session-id":                       true,
+	"thread-id":                        true,
+	"thread_id":                        true,
+	"traceparent":                      true,
+	"tracestate":                       true,
+	"x-client-request-id":              true,
+	"x-codex-beta-features":            true,
+	"x-codex-installation-id":          true,
+	"x-codex-turn-state":               true,
+	"x-codex-turn-metadata":            true,
+	"x-codex-window-id":                true,
+	responsesLiteHeaderKey:             true,
 }
 
 // Diagnostic-only header allowlist for official-client rejections.
@@ -510,10 +522,8 @@ type OpenAIGatewayService struct {
 	openAIModelsCache                   openAIModelsCache
 	openaiCompatSessionResponses        sessionMemoryCache
 	openaiCompatAnthropicDigestSessions sessionMemoryCache
-	// openaiCodexTurnStateOrigins: 下游会话 seed → openAICodexTurnStateOrigin，
-	// 记录最近一次向该会话下发 x-codex-turn-state 的铸造账号，供出站守卫
-	// 剥离跨账号回带（openai_codex_turn_state.go）。
-	openaiCodexTurnStateOrigins sync.Map
+	// Bounded per-blob provenance cache; shared ownership is stored in Redis.
+	openaiCodexTurnStateOrigins openAICodexTurnStateOrigins
 	openaiCodexTurnStateWrites  atomic.Uint64
 }
 
@@ -546,6 +556,7 @@ func NewOpenAIGatewayService(
 	// and probes. The negative config flag defaults to enforcement enabled.
 	if cfg != nil {
 		SetCodexIdentityEnforcementEnabled(!cfg.Gateway.DisableCodexIdentityEnforcement)
+		codexUSLocaleEnabled.Store(cfg.Gateway.CodexUSLocale)
 	}
 	svc := &OpenAIGatewayService{
 		accountRepo:         accountRepo,

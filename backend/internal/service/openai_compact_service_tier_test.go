@@ -89,11 +89,7 @@ func TestOpenAIOAuthCompactHTTPBuildersUsePreservedServiceTierInRoutingHint(t *t
 
 			req, buildErr := tt.build(c)
 			require.NoError(t, buildErr)
-			require.Equal(
-				t,
-				"model=gpt-5.6-sol;tier=priority",
-				req.Header.Get(openAICodexRoutingHintHeader),
-			)
+			require.Equal(t, "model=gpt-5.6-sol;tier=priority", req.Header.Get(openAICodexRoutingHintHeader))
 			require.Equal(t, "priority", gjson.GetBytes(normalized, "service_tier").String())
 		})
 	}

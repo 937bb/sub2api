@@ -71,9 +71,16 @@ func TestSetOpenAICodexRoutingHintCanonicalizesOfficialServiceTiers(t *testing.T
 		require.Equal(t, "model=gpt-5.6;tier=priority", headers.Get(openAICodexRoutingHintHeader))
 		require.Len(t, headers, 1)
 	})
+
+	t.Run("guardian reviewer omits routing hint", func(t *testing.T) {
+		headers := make(http.Header)
+		headers.Set(openAICodexGuardianHeader, "reviewer")
+		setOpenAICodexRoutingHint(headers, oauthAccount, "gpt-5.6", "priority")
+		require.Empty(t, headers.Get(openAICodexRoutingHintHeader))
+	})
 }
 
-func TestOpenAIOAuthHTTPBuildersSendRoutingHintFromFinalBody(t *testing.T) {
+func TestOpenAIOAuthHTTPBuildersSendOfficialRoutingHint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	oauthAccount := &Account{
 		Platform: PlatformOpenAI,
@@ -116,11 +123,66 @@ func TestOpenAIOAuthHTTPBuildersSendRoutingHintFromFinalBody(t *testing.T) {
 						req, err = svc.buildUpstreamRequest(context.Background(), c, oauthAccount, tt.body, "test-token", false, "", true)
 					}
 					require.NoError(t, err)
-					require.Equal(t, tt.want, req.Header.Get(openAICodexRoutingHintHeader))
+					require.Equal(t, tt.want, req.Header.Get(openAICodexRoutingHintHeader), "Codex OAuth routing hint must reach the upstream wire")
 				})
 			}
 		})
 	}
+}
+
+func TestOpenAIMemgenRequestHeaderIsForwardedByBothOpenAIPaths(t *testing.T) {
+	require.True(t, openaiAllowedHeaders[openAIMemgenRequestHeader])
+	require.True(t, openaiPassthroughAllowedHeaders[openAIMemgenRequestHeader])
+
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "test-account"}}
+	body := []byte(`{"model":"gpt-5.6-codex","input":[]}`)
+	for _, passthrough := range []bool{false, true} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+		c.Request.Header.Set(openAIMemgenRequestHeader, "true")
+		var req *http.Request
+		var err error
+		if passthrough {
+			req, err = svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "test-token")
+		} else {
+			req, err = svc.buildUpstreamRequest(context.Background(), c, account, body, "test-token", false, "", true)
+		}
+		require.NoError(t, err)
+		require.Equal(t, "true", req.Header.Get(openAIMemgenRequestHeader))
+	}
+
+	wsRecorder := httptest.NewRecorder()
+	wsContext, _ := gin.CreateTestContext(wsRecorder)
+	wsContext.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	wsContext.Request.Header.Set(openAIMemgenRequestHeader, "true")
+	wsHeaders, _, err := svc.buildOpenAIWSHeaders(context.Background(), wsContext, account, "test-token", OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, true, "", "", "", "gpt-5.6-codex", "")
+	require.NoError(t, err)
+	require.Equal(t, "true", wsHeaders.Get(openAIMemgenRequestHeader))
+}
+
+func TestOpenAITimingMetricsHeaderIsPreservedWhenClientEnablesIt(t *testing.T) {
+	require.True(t, openaiAllowedHeaders[openAIResponsesTimingMetricsHeader])
+	require.True(t, openaiPassthroughAllowedHeaders[openAIResponsesTimingMetricsHeader])
+
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{}
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{"chatgpt_account_id": "test-account"}}
+	body := []byte(`{"model":"gpt-5.6-codex","input":[]}`)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set(openAIResponsesTimingMetricsHeader, "true")
+
+	req, err := svc.buildUpstreamRequest(context.Background(), c, account, body, "test-token", false, "", true)
+	require.NoError(t, err)
+	require.Equal(t, "true", req.Header.Get(openAIResponsesTimingMetricsHeader))
+
+	wsHeaders, _, err := svc.buildOpenAIWSHeaders(context.Background(), c, account, "test-token", OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, true, "", "", "", "gpt-5.6-codex", "")
+	require.NoError(t, err)
+	require.Equal(t, "true", wsHeaders.Get(openAIResponsesTimingMetricsHeader))
 }
 
 func TestOpenAIHTTPPassthroughStripsOnlyOAuthLegacyResponsesBeta(t *testing.T) {

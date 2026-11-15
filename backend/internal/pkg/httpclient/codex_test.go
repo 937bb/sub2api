@@ -19,7 +19,7 @@ import (
 
 func testCodexUA() string {
 	version := openai.CodexDesktopEngineVersion
-	return openai.CodexDefaultOriginator + "/" + version + openai.CodexLocalCLIPlatform + " (codex_exec; " + version + ")"
+	return openai.CodexExecOriginator + "/" + version + openai.CodexLocalCLIPlatform + " (codex_exec; " + version + ")"
 }
 
 func TestCodexClientTLSReuseIdentityAndCloseIdle(t *testing.T) {

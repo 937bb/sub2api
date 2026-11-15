@@ -15,6 +15,7 @@ import (
 type pluginRoutingHTTPUpstream struct {
 	doCalls        int
 	doWithTLSCalls int
+	lastTLSProfile *tlsfingerprint.Profile
 }
 
 func (u *pluginRoutingHTTPUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
@@ -31,10 +32,58 @@ func (u *pluginRoutingHTTPUpstream) DoWithTLS(
 	proxyURL string,
 	accountID int64,
 	accountConcurrency int,
-	_ *tlsfingerprint.Profile,
+	profile *tlsfingerprint.Profile,
 ) (*http.Response, error) {
 	u.doWithTLSCalls++
-	return u.Do(request, proxyURL, accountID, accountConcurrency)
+	u.lastTLSProfile = profile
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader("tls")),
+	}, nil
+}
+
+func TestOpenAIGatewayDirectOAuthUsesMeasuredCodexHTTPProfile(t *testing.T) {
+	t.Setenv("CODEX_CA_CERTIFICATE", "")
+	t.Setenv("SSL_CERT_FILE", "")
+	upstream := &pluginRoutingHTTPUpstream{}
+	service := &OpenAIGatewayService{httpUpstream: upstream}
+
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeSetupToken} {
+		request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.com/v1/responses", nil)
+		require.NoError(t, err)
+		response, err := service.doOpenAIUpstream(request, "", &Account{
+			ID: 20, Platform: PlatformOpenAI, Type: accountType, Concurrency: 1,
+		})
+		require.NoError(t, err)
+		require.NotNil(t, response)
+		require.NoError(t, response.Body.Close())
+		require.NotNil(t, upstream.lastTLSProfile)
+		require.Equal(t, tlsfingerprint.CodexLocalHTTPProfile().CacheKey(), upstream.lastTLSProfile.CacheKey())
+	}
+
+	require.Equal(t, 0, upstream.doCalls)
+	require.Equal(t, 2, upstream.doWithTLSCalls)
+}
+
+func TestOpenAIAccountTestOAuthUsesMeasuredCodexHTTPProfile(t *testing.T) {
+	t.Setenv("CODEX_CA_CERTIFICATE", "")
+	t.Setenv("SSL_CERT_FILE", "")
+	upstream := &pluginRoutingHTTPUpstream{}
+	service := &AccountTestService{httpUpstream: upstream}
+
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://example.com/backend-api/codex/responses", nil)
+	require.NoError(t, err)
+	response, err := service.doOpenAIAccountTestUpstream(request, "", &Account{
+		ID: 21, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+	}, true)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, 0, upstream.doCalls)
+	require.Equal(t, 1, upstream.doWithTLSCalls)
+	require.NotNil(t, upstream.lastTLSProfile)
+	require.Equal(t, tlsfingerprint.CodexLocalHTTPProfile().CacheKey(), upstream.lastTLSProfile.CacheKey())
 }
 
 func TestPluginManagerRoutingDoesNotTouchAPIKeyOrOtherProviders(t *testing.T) {

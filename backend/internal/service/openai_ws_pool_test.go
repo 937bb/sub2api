@@ -73,6 +73,80 @@ func TestNormalizeOpenAIWSRoutingAffinityPrefersCanonicalAndSortsVariants(t *tes
 	require.Equal(t, "variant-uppercase", normalizeOpenAIWSRoutingAffinity(headers))
 }
 
+func TestNormalizeOpenAIWSHandshakeCompatibilityExcludesFrameTraceContext(t *testing.T) {
+	headers := http.Header{
+		"Traceparent": {" 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01 "},
+		"Tracestate":  {"vendor=one"},
+		"Baggage":     {"tenant=alpha", "region=us-east-1"},
+	}
+
+	got := normalizeOpenAIWSHandshakeCompatibility(nil, headers)
+
+	changed := headers.Clone()
+	changed["Baggage"] = []string{"tenant=beta", "region=us-east-1"}
+	require.Equal(t, got, normalizeOpenAIWSHandshakeCompatibility(nil, changed))
+}
+
+func TestOpenAIWSConnPoolDifferentTraceContextReusesHandshake(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 2
+	cfg.Gateway.OpenAIWS.MinIdlePerAccount = 0
+	cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 2
+
+	pool := newOpenAIWSConnPool(cfg)
+	dialer := &openAIWSCountingDialer{}
+	pool.setClientDialerForTest(dialer)
+	account := &Account{ID: 43, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	base := openAIWSAcquireRequest{
+		Account: account,
+		WSURL:   "wss://example.com/backend-api/codex/responses",
+		Headers: http.Header{
+			"Traceparent": {"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"},
+			"Tracestate":  {"vendor=one"},
+			"Baggage":     {"tenant=alpha"},
+		},
+	}
+
+	first, err := pool.Acquire(context.Background(), base)
+	require.NoError(t, err)
+	firstConnID := first.ConnID()
+	first.Release()
+
+	changed := base
+	changed.Headers = base.Headers.Clone()
+	changed.Headers.Set("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-1111111111111111-01")
+	second, err := pool.Acquire(context.Background(), changed)
+	require.NoError(t, err)
+	require.True(t, second.Reused())
+	require.Equal(t, firstConnID, second.ConnID())
+	second.Release()
+	require.Equal(t, 1, dialer.DialCount())
+}
+
+func TestOpenAIWSConnPoolRoutingHintReachesUpstream(t *testing.T) {
+	cfg := &config.Config{}
+	pool := newOpenAIWSConnPool(cfg)
+	dialer := newOpenAIWSFirstDialBlockingCaptureDialer()
+	close(dialer.releaseFirst)
+	pool.setClientDialerForTest(dialer)
+
+	headers := http.Header{}
+	headers.Set(openAICodexRoutingHintHeader, "model=gpt-5.6-codex;tier=priority")
+	account := &Account{ID: 42, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	conn, err := pool.dialConn(context.Background(), openAIWSAcquireRequest{
+		Account: account,
+		WSURL:   "wss://example.com/backend-api/codex/responses",
+		Headers: headers,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, conn)
+	require.Equal(t, "model=gpt-5.6-codex;tier=priority", headers.Get(openAICodexRoutingHintHeader))
+	dialer.mu.Lock()
+	require.Len(t, dialer.headers, 1)
+	require.Equal(t, "model=gpt-5.6-codex;tier=priority", dialer.headers[0].Get(openAICodexRoutingHintHeader))
+	dialer.mu.Unlock()
+}
+
 func TestOpenAIWSConnLease_WriteJSONAndGuards(t *testing.T) {
 	conn := newOpenAIWSConn("lease_write", 1, &openAIWSFakeConn{}, nil)
 	lease := &openAIWSConnLease{conn: conn}

@@ -38,6 +38,7 @@ type openAIWSConnBinding struct {
 }
 
 type openAIWSTurnStateBinding struct {
+	owner     string
 	turnState string
 	expiresAt time.Time
 }
@@ -332,6 +333,10 @@ func (s *defaultOpenAIWSStateStore) DeleteResponseConn(responseID string) {
 }
 
 func (s *defaultOpenAIWSStateStore) BindSessionTurnState(groupID int64, sessionHash, turnState string, ttl time.Duration) {
+	s.BindSessionTurnStateForOwner(groupID, sessionHash, turnState, "", ttl)
+}
+
+func (s *defaultOpenAIWSStateStore) BindSessionTurnStateForOwner(groupID int64, sessionHash, turnState, owner string, ttl time.Duration) {
 	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
 	state := strings.TrimSpace(turnState)
 	if key == "" || state == "" {
@@ -343,6 +348,7 @@ func (s *defaultOpenAIWSStateStore) BindSessionTurnState(groupID int64, sessionH
 	s.sessionToTurnStateMu.Lock()
 	ensureBindingCapacity(s.sessionToTurnState, key, openAIWSStateStoreMaxEntriesPerMap)
 	s.sessionToTurnState[key] = openAIWSTurnStateBinding{
+		owner:     owner,
 		turnState: state,
 		expiresAt: time.Now().Add(ttl),
 	}
@@ -350,6 +356,17 @@ func (s *defaultOpenAIWSStateStore) BindSessionTurnState(groupID int64, sessionH
 }
 
 func (s *defaultOpenAIWSStateStore) GetSessionTurnState(groupID int64, sessionHash string) (string, bool) {
+	return s.getSessionTurnState(groupID, sessionHash, "", false)
+}
+
+func (s *defaultOpenAIWSStateStore) GetSessionTurnStateForOwner(groupID int64, sessionHash, owner string) (string, bool) {
+	if owner == "" {
+		return "", false
+	}
+	return s.getSessionTurnState(groupID, sessionHash, owner, true)
+}
+
+func (s *defaultOpenAIWSStateStore) getSessionTurnState(groupID int64, sessionHash, owner string, requireOwner bool) (string, bool) {
 	key := openAIWSSessionTurnStateKey(groupID, sessionHash)
 	if key == "" {
 		return "", false
@@ -360,7 +377,7 @@ func (s *defaultOpenAIWSStateStore) GetSessionTurnState(groupID int64, sessionHa
 	s.sessionToTurnStateMu.RLock()
 	binding, ok := s.sessionToTurnState[key]
 	s.sessionToTurnStateMu.RUnlock()
-	if !ok || now.After(binding.expiresAt) || strings.TrimSpace(binding.turnState) == "" {
+	if !ok || (requireOwner && binding.owner != owner) || now.After(binding.expiresAt) || strings.TrimSpace(binding.turnState) == "" {
 		return "", false
 	}
 	return binding.turnState, true

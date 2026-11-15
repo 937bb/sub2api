@@ -23,6 +23,7 @@ var codexOfficialClientUAPrefixes = []string{
 	"codex_vscode_copilot/",
 	"codex_app/",
 	"codex_chatgpt_desktop/",
+	"codex_work_desktop/",
 	"codex_atlas/",
 	"codex_exec/",
 	"codex_sdk_ts/",
@@ -41,6 +42,7 @@ var codexOfficialClientOriginators = map[string]bool{
 	"codex_vscode_copilot":  true, // GitHub Copilot extension integration
 	"codex_app":             true, // Legacy identity
 	"codex_chatgpt_desktop": true, // is_first_party_chat_originator
+	"codex_work_desktop":    true, // Desktop Work/local executor
 	"codex_atlas":           true, // is_first_party_chat_originator
 	"codex_exec":            true, // Noninteractive codex exec
 	"codex_sdk_ts":          true, // TypeScript SDK
@@ -225,8 +227,14 @@ const CodexCLIOriginator = "codex_cli_rs"
 // CodexTUIOriginator identifies the interactive TUI.
 const CodexTUIOriginator = "codex-tui"
 
-// CodexDefaultOriginator uses the locally measured noninteractive CLI identity.
-const CodexDefaultOriginator = "codex_exec"
+// CodexExecOriginator identifies noninteractive `codex exec` requests.
+const CodexExecOriginator = "codex_exec"
+
+// CodexWorkDesktopOriginator identifies the Desktop Work/local executor.
+const CodexWorkDesktopOriginator = "codex_work_desktop"
+
+// CodexDefaultOriginator follows the locally inspected Desktop host profile.
+const CodexDefaultOriginator = CodexDesktopOriginator
 
 // NormalizeCodexClientIdentityToCLI preserves production compatibility for TUI
 // profiles by changing the originator and UA prefix together. Engine/platform

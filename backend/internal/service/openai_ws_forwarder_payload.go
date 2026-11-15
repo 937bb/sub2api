@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/gin-gonic/gin"
@@ -106,6 +107,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		for _, name := range [...]string{
 			codexParentThreadIDHeader,
 			openAISubagentHeader,
+			openAIMemgenRequestHeader,
+			openAICodexGuardianHeader,
+			openAIResponsesTimingMetricsHeader,
 			"x-codex-window-id",
 			"x-codex-installation-id",
 			"session-id",
@@ -146,8 +150,8 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	if metadata := strings.TrimSpace(turnMetadata); metadata != "" {
 		headers.Set(openAIWSTurnMetadataHeader, metadata)
 	}
-	applyCodexAccountIdentityHeaders(headers, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
-	applyStagedCodexFingerprintHeaders(c, account, headers)
+	s.guardOpenAICodexTurnStateEcho(c, account, headers)
+	applyCodexOutboundIdentityHeaders(c, account, headers)
 
 	if account != nil && account.UsesOpenAICodexProtocol() {
 		if err := resolveAndSetOpenAIChatGPTAccountHeaders(ctx, s.accountRepo, headers, account); err != nil {
@@ -195,6 +199,13 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 		strings.TrimSpace(headers.Get(openAICodexRoutingHintHeader)) != "",
 		"soft_routing_hint",
 	)
+	if account != nil && account.UsesOpenAICodexProtocol() {
+		applyCodexUSLocaleHeaders(headers)
+		finalizeCodexDesktopInferenceHeaders(headers, false)
+		// Native Codex WS connects with turn_state=None. The opaque value is
+		// attached to each response.create frame's client_metadata instead.
+		headers.Del(openAICodexTurnStateHeader)
+	}
 
 	return headers, sessionResolution, nil
 }
@@ -212,6 +223,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 		payload["stream"] = true
 	}
 	payload["type"] = "response.create"
+	normalizeCodexUSLocaleMap(payload, account)
 	normalizeCodexDeveloperMessageMap(payload, account)
 
 	// OAuth 默认保持 store=false，避免误依赖服务端历史。
@@ -221,6 +233,124 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 	return payload
 }
 
+// applyOpenAIWSRequestTraceMetadata mirrors Codex Desktop's WS request
+// metadata contract. The native client does not copy W3C trace headers onto
+// the websocket upgrade; it places the real inbound values on each
+// response.create frame. Missing values remain missing and explicit frame
+// metadata is never overwritten.
+func applyOpenAIWSRequestTraceMetadata(payload map[string]any, c *gin.Context) bool {
+	if len(payload) == 0 || c == nil || c.Request == nil {
+		return false
+	}
+	traceparent := strings.TrimSpace(c.Request.Header.Get("traceparent"))
+	tracestate := strings.TrimSpace(c.Request.Header.Get("tracestate"))
+	if traceparent == "" && tracestate == "" {
+		return false
+	}
+
+	var metadata map[string]any
+	switch existing := payload["client_metadata"].(type) {
+	case map[string]any:
+		metadata = make(map[string]any, len(existing)+2)
+		for key, value := range existing {
+			metadata[key] = value
+		}
+	case map[string]string:
+		metadata = make(map[string]any, len(existing)+2)
+		for key, value := range existing {
+			metadata[key] = value
+		}
+	case nil:
+		metadata = make(map[string]any, 2)
+	default:
+		// Preserve malformed/explicit non-object metadata. The caller's payload
+		// must not be silently reshaped by telemetry propagation.
+		return false
+	}
+	changed := false
+	if traceparent != "" {
+		if _, exists := metadata[openAIWSRequestTraceparentMetadataKey]; !exists {
+			metadata[openAIWSRequestTraceparentMetadataKey] = traceparent
+			changed = true
+		}
+	}
+	if tracestate != "" {
+		if _, exists := metadata[openAIWSRequestTracestateMetadataKey]; !exists {
+			metadata[openAIWSRequestTracestateMetadataKey] = tracestate
+			changed = true
+		}
+	}
+	if changed {
+		payload["client_metadata"] = metadata
+	}
+	return changed
+}
+
+func applyOpenAIWSRequestTraceMetadataRaw(payload []byte, c *gin.Context) ([]byte, bool, error) {
+	if len(payload) == 0 || c == nil || c.Request == nil ||
+		(strings.TrimSpace(c.Request.Header.Get("traceparent")) == "" && strings.TrimSpace(c.Request.Header.Get("tracestate")) == "") {
+		return payload, false, nil
+	}
+	var decoded map[string]any
+	if err := decodeOpenAIJSONUseNumber(payload, &decoded); err != nil {
+		return payload, false, err
+	}
+	if !applyOpenAIWSRequestTraceMetadata(decoded, c) {
+		return payload, false, nil
+	}
+	rebuilt, err := marshalOpenAIUpstreamJSON(decoded)
+	if err != nil {
+		return payload, false, err
+	}
+	return rebuilt, true, nil
+}
+
+// stampOpenAIWSStreamRequestStartMS follows the native client and overwrites
+// the per-frame send timestamp immediately before a response.create is written.
+func stampOpenAIWSStreamRequestStartMS(payload map[string]any, now time.Time) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	var metadata map[string]any
+	switch existing := payload["client_metadata"].(type) {
+	case map[string]any:
+		metadata = make(map[string]any, len(existing)+1)
+		for key, value := range existing {
+			metadata[key] = value
+		}
+	case map[string]string:
+		metadata = make(map[string]any, len(existing)+1)
+		for key, value := range existing {
+			metadata[key] = value
+		}
+	case nil:
+		metadata = make(map[string]any, 1)
+	default:
+		return false
+	}
+	metadata[openAIWSStreamRequestStartMSMetadataKey] = fmt.Sprintf("%d", now.UnixMilli())
+	payload["client_metadata"] = metadata
+	return true
+}
+
+func stampOpenAIWSStreamRequestStartMSRaw(payload []byte, now time.Time) ([]byte, bool, error) {
+	var decoded map[string]any
+	if err := decodeOpenAIJSONUseNumber(payload, &decoded); err != nil {
+		return payload, false, err
+	}
+	if !stampOpenAIWSStreamRequestStartMS(decoded, now) {
+		return payload, false, nil
+	}
+	rebuilt, err := marshalOpenAIUpstreamJSON(decoded)
+	if err != nil {
+		return payload, false, err
+	}
+	return rebuilt, true, nil
+}
+
+// Fill only a missing field. Explicit empty/null/malformed values remain the
+// caller's input; never replace a frame with stale handshake metadata. Copy nested
+// maps because the HTTP-to-WS payload initially shares them with the request.
 func setOpenAIWSTurnMetadata(payload map[string]any, turnMetadata string) {
 	if len(payload) == 0 {
 		return
@@ -232,9 +362,19 @@ func setOpenAIWSTurnMetadata(payload map[string]any, turnMetadata string) {
 
 	switch existing := payload["client_metadata"].(type) {
 	case map[string]any:
-		existing[openAIWSTurnMetadataHeader] = metadata
-		payload["client_metadata"] = existing
+		if _, exists := existing[openAIWSTurnMetadataHeader]; exists {
+			return
+		}
+		next := make(map[string]any, len(existing)+1)
+		for k, v := range existing {
+			next[k] = v
+		}
+		next[openAIWSTurnMetadataHeader] = metadata
+		payload["client_metadata"] = next
 	case map[string]string:
+		if _, exists := existing[openAIWSTurnMetadataHeader]; exists {
+			return
+		}
 		next := make(map[string]any, len(existing)+1)
 		for k, v := range existing {
 			next[k] = v
@@ -923,4 +1063,18 @@ func shouldKeepIngressPreviousResponseIDWithStrictState(
 		return false, "non_input_changed", nil
 	}
 	return true, "strict_incremental_ok", nil
+}
+
+// The payload has already been scoped/normalized; copying its metadata avoids
+// applying identity transformations twice when rebuilding a reconnect handshake.
+func updateOpenAIWSFrameTurnMetadataHeader(headers http.Header, payload []byte) {
+	if headers == nil {
+		return
+	}
+	value := gjson.GetBytes(payload, "client_metadata."+openAIWSTurnMetadataHeader)
+	if value.Type == gjson.String && strings.TrimSpace(value.String()) != "" {
+		headers.Set(openAIWSTurnMetadataHeader, value.String())
+	} else {
+		headers.Del(openAIWSTurnMetadataHeader)
+	}
 }

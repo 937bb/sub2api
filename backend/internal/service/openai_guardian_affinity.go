@@ -9,10 +9,13 @@ import (
 )
 
 const (
-	codexAutoReviewModel      = "codex-auto-review"
-	openAISubagentHeader      = "x-openai-subagent"
-	codexParentThreadIDHeader = "x-codex-parent-thread-id"
-	codexTurnMetadataHeader   = "x-codex-turn-metadata"
+	codexAutoReviewModel               = "codex-auto-review"
+	openAISubagentHeader               = "x-openai-subagent"
+	openAIMemgenRequestHeader          = "x-openai-memgen-request"
+	openAICodexGuardianHeader          = "x-codex-guardian"
+	openAIResponsesTimingMetricsHeader = "x-responsesapi-include-timing-metrics"
+	codexParentThreadIDHeader          = "x-codex-parent-thread-id"
+	codexTurnMetadataHeader            = "x-codex-turn-metadata"
 )
 
 type openAIGuardianParentAffinityContextKey struct{}

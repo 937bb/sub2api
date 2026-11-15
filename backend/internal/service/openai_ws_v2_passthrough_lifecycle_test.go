@@ -105,10 +105,21 @@ func (c *stagedPassthroughConn) Close() error {
 
 type stagedPassthroughDialer struct {
 	conn openAIWSClientConn
+	mu   sync.Mutex
+	hdr  http.Header
 }
 
-func (d *stagedPassthroughDialer) Dial(context.Context, string, http.Header, string) (openAIWSClientConn, int, http.Header, error) {
+func (d *stagedPassthroughDialer) Dial(_ context.Context, _ string, headers http.Header, _ string) (openAIWSClientConn, int, http.Header, error) {
+	d.mu.Lock()
+	d.hdr = headers.Clone()
+	d.mu.Unlock()
 	return d.conn, http.StatusSwitchingProtocols, http.Header{}, nil
+}
+
+func (d *stagedPassthroughDialer) Headers() http.Header {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.hdr.Clone()
 }
 
 func newPassthroughLifecycleService(cfg *config.Config, upstream *stagedPassthroughConn) *OpenAIGatewayService {
@@ -474,9 +485,13 @@ func dialPassthroughLifecycleClient(t *testing.T, server *httptest.Server) *code
 }
 
 func dialPassthroughLifecycleClientWithPayload(t *testing.T, server *httptest.Server, payload string) *coderws.Conn {
+	return dialPassthroughLifecycleClientWithHeadersAndPayload(t, server, nil, payload)
+}
+
+func dialPassthroughLifecycleClientWithHeadersAndPayload(t *testing.T, server *httptest.Server, headers http.Header, payload string) *coderws.Conn {
 	t.Helper()
 	dialCtx, cancelDial := context.WithTimeout(context.Background(), 3*time.Second)
-	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	clientConn, _, err := coderws.Dial(dialCtx, "ws"+strings.TrimPrefix(server.URL, "http"), &coderws.DialOptions{HTTPHeader: headers})
 	cancelDial()
 	require.NoError(t, err)
 	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
@@ -484,6 +499,78 @@ func dialPassthroughLifecycleClientWithPayload(t *testing.T, server *httptest.Se
 	cancelWrite()
 	require.NoError(t, err)
 	return clientConn
+}
+
+func TestPassthroughLifecycle_TraceMetadataStaysOnEveryResponseCreateFrame(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controlCtx, cancelControl := context.WithCancelCause(context.Background())
+	defer cancelControl(context.Canceled)
+	upstream := newStagedPassthroughConn()
+	svc := newPassthroughLifecycleService(passthroughLifecycleConfig(), upstream)
+	dialer := svc.openaiWSPassthroughDialer.(*stagedPassthroughDialer)
+	server, serverErr := startPassthroughLifecycleServer(t, controlCtx, svc, passthroughLifecycleAccount())
+	defer server.Close()
+
+	traceparent := "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	tracestate := "vendor=one"
+	headers := http.Header{
+		"Traceparent": []string{traceparent},
+		"Tracestate":  []string{tracestate},
+		"Baggage":     []string{"tenant=alpha"},
+	}
+	clientConn := dialPassthroughLifecycleClientWithHeadersAndPayload(t, server, headers, `{
+		"type":"response.create","model":"gpt-5.1","stream":false,
+		"client_metadata":{"x-codex-ws-stream-request-start-ms":"100","keep":"first"}
+	}`)
+	defer func() { _ = clientConn.CloseNow() }()
+
+	firstRequest := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+	firstStamp := gjson.GetBytes(firstRequest, "client_metadata."+openAIWSStreamRequestStartMSMetadataKey).String()
+	require.Equal(t, traceparent, gjson.GetBytes(firstRequest, "client_metadata."+openAIWSRequestTraceparentMetadataKey).String())
+	require.Equal(t, tracestate, gjson.GetBytes(firstRequest, "client_metadata."+openAIWSRequestTracestateMetadataKey).String())
+	require.Equal(t, "first", gjson.GetBytes(firstRequest, "client_metadata.keep").String())
+	require.NotEmpty(t, firstStamp)
+	require.NotEqual(t, "100", firstStamp)
+	require.False(t, gjson.GetBytes(firstRequest, "client_metadata.baggage").Exists())
+
+	handshakeHeaders := dialer.Headers()
+	require.Empty(t, handshakeHeaders.Get("traceparent"))
+	require.Empty(t, handshakeHeaders.Get("tracestate"))
+	require.Empty(t, handshakeHeaders.Get("baggage"))
+
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_first","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	completed, err := readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "response.completed", gjson.GetBytes(completed, "type").String())
+
+	time.Sleep(2 * time.Millisecond)
+	writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+	err = clientConn.Write(writeCtx, coderws.MessageText, []byte(`{
+		"type":"response.create","model":"gpt-5.1","stream":false,
+		"client_metadata":{"x-codex-ws-stream-request-start-ms":"200","keep":"second"}
+	}`))
+	cancelWrite()
+	require.NoError(t, err)
+	secondRequest := requirePassthroughUpstreamWrite(t, upstream, 3*time.Second)
+	secondStamp := gjson.GetBytes(secondRequest, "client_metadata."+openAIWSStreamRequestStartMSMetadataKey).String()
+	require.Equal(t, traceparent, gjson.GetBytes(secondRequest, "client_metadata."+openAIWSRequestTraceparentMetadataKey).String())
+	require.Equal(t, tracestate, gjson.GetBytes(secondRequest, "client_metadata."+openAIWSRequestTracestateMetadataKey).String())
+	require.Equal(t, "second", gjson.GetBytes(secondRequest, "client_metadata.keep").String())
+	require.NotEmpty(t, secondStamp)
+	require.NotEqual(t, "200", secondStamp)
+	require.NotEqual(t, firstStamp, secondStamp)
+	require.False(t, gjson.GetBytes(secondRequest, "client_metadata.baggage").Exists())
+
+	upstream.Send(`{"type":"response.completed","response":{"id":"resp_second","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)
+	completed, err = readPassthroughLifecycleFrame(t, clientConn, 3*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "response.completed", gjson.GetBytes(completed, "type").String())
+	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
+	select {
+	case <-serverErr:
+	case <-time.After(3 * time.Second):
+		t.Fatal("passthrough trace metadata test did not exit")
+	}
 }
 
 func readPassthroughLifecycleFrame(t *testing.T, clientConn *coderws.Conn, timeout time.Duration) ([]byte, error) {

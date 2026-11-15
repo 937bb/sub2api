@@ -236,6 +236,28 @@ func TestOpenAIGatewayService_Forward_NormalizesMaxTokensAndStripsPromptCacheOpt
 	})
 }
 
+func TestOpenAIOAuthResponsesPreservesPromptCacheOptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "test-account",
+		},
+	}
+	body := []byte(`{"model":"gpt-5.6-codex","stream":true,"prompt_cache_options":{"ttl":"30m"},"input":[]}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", nil)
+
+	req, err := svc.buildUpstreamRequest(context.Background(), c, account, body, "test-token", false, "", true)
+	require.NoError(t, err)
+	forwarded, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	require.Equal(t, "30m", gjson.GetBytes(forwarded, "prompt_cache_options.ttl").String())
+}
+
 func TestOpenAIGatewayService_Forward_MappedImageModelUsesImageGate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstream := &httpUpstreamRecorder{
