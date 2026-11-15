@@ -18,8 +18,50 @@ func (s *OpenAIGatewayService) isOpenAIWSGeneratePrewarmEnabled() bool {
 	return s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.PrewarmGenerateEnabled
 }
 
+func codexDesktopPrewarmTurnMetadata(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	metadata := map[string]any{}
+	if err := decodeCodexIdentityMetadata(raw, &metadata); err != nil || metadata == nil {
+		return raw
+	}
+	metadata["request_kind"] = "prewarm"
+	delete(metadata, "root_turn_id")
+	delete(metadata, "turn_started_at_unix_ms")
+	rebuilt, err := marshalCodexTurnMetadata(metadata)
+	if err != nil {
+		return raw
+	}
+	return string(rebuilt)
+}
+
+func codexDesktopPrewarmPayload(payload map[string]any) map[string]any {
+	prewarm := make(map[string]any, len(payload)+1)
+	for key, value := range payload {
+		prewarm[key] = value
+	}
+	metadata, ok := payload["client_metadata"].(map[string]any)
+	if !ok || metadata == nil {
+		return prewarm
+	}
+	prewarmMetadata := make(map[string]any, len(metadata))
+	for key, value := range metadata {
+		prewarmMetadata[key] = value
+	}
+	delete(prewarmMetadata, "root_turn_id")
+	delete(prewarmMetadata, "turn_started_at_unix_ms")
+	if raw, ok := prewarmMetadata[openAIWSTurnMetadataHeader].(string); ok {
+		prewarmMetadata[openAIWSTurnMetadataHeader] = codexDesktopPrewarmTurnMetadata(raw)
+	}
+	prewarm["client_metadata"] = prewarmMetadata
+	return prewarm
+}
+
 // performOpenAIWSGeneratePrewarm 在 WSv2 下执行可选的 generate=false 预热。
-// 预热默认关闭，仅在配置开启后生效；失败时按可恢复错误回退到 HTTP。
+// 返回预热 response ID，调用方用它把正式请求转换成同连接 continuation。
+// 失败时按可恢复错误回退到 HTTP。
 func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	ctx context.Context,
 	lease *openAIWSConnLease,
@@ -30,17 +72,17 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	account *Account,
 	stateStore OpenAIWSStateStore,
 	groupID int64,
-) error {
+) (string, error) {
 	if s == nil {
-		return nil
+		return "", nil
 	}
 	if lease == nil || account == nil {
 		logOpenAIWSModeInfo("prewarm_skip reason=invalid_state has_lease=%v has_account=%v", lease != nil, account != nil)
-		return nil
+		return "", nil
 	}
 	connID := strings.TrimSpace(lease.ConnID())
 	if !s.isOpenAIWSGeneratePrewarmEnabled() {
-		return nil
+		return "", nil
 	}
 	if decision.Transport != OpenAIUpstreamTransportResponsesWebsocketV2 {
 		logOpenAIWSModeInfo(
@@ -49,7 +91,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 			connID,
 			normalizeOpenAIWSLogValue(string(decision.Transport)),
 		)
-		return nil
+		return "", nil
 	}
 	if strings.TrimSpace(previousResponseID) != "" {
 		logOpenAIWSModeInfo(
@@ -58,23 +100,20 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 			connID,
 			truncateOpenAIWSLogValue(previousResponseID, openAIWSIDValueMaxLen),
 		)
-		return nil
+		return "", nil
 	}
 	if lease.IsPrewarmed() {
 		logOpenAIWSModeInfo("prewarm_skip account_id=%d conn_id=%s reason=already_prewarmed", account.ID, connID)
-		return nil
+		return "", nil
 	}
 	if NeedsToolContinuation(reqBody) {
 		logOpenAIWSModeInfo("prewarm_skip account_id=%d conn_id=%s reason=tool_continuation", account.ID, connID)
-		return nil
+		return "", nil
 	}
 	prewarmStart := time.Now()
 	logOpenAIWSModeInfo("prewarm_start account_id=%d conn_id=%s", account.ID, connID)
 
-	prewarmPayload := make(map[string]any, len(payload)+1)
-	for k, v := range payload {
-		prewarmPayload[k] = v
-	}
+	prewarmPayload := codexDesktopPrewarmPayload(payload)
 	prewarmPayload["generate"] = false
 	stampOpenAIWSStreamRequestStartMS(prewarmPayload, time.Now())
 	prewarmPayloadJSON := payloadAsJSONBytes(prewarmPayload)
@@ -87,7 +126,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 			connID,
 			truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen),
 		)
-		return wrapOpenAIWSFallback("prewarm_write", err)
+		return "", wrapOpenAIWSFallback("prewarm_write", err)
 	}
 	logOpenAIWSModeInfo("prewarm_write_sent account_id=%d conn_id=%s payload_bytes=%d", account.ID, connID, len(prewarmPayloadJSON))
 
@@ -108,7 +147,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 				truncateOpenAIWSLogValue(readErr.Error(), openAIWSLogValueMaxLen),
 				prewarmEventCount,
 			)
-			return wrapOpenAIWSFallback("prewarm_"+classifyOpenAIWSReadFallbackReason(readErr), readErr)
+			return "", wrapOpenAIWSFallback("prewarm_"+classifyOpenAIWSReadFallbackReason(readErr), readErr)
 		}
 
 		eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(message)
@@ -153,9 +192,9 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 			)
 			lease.MarkBroken()
 			if canFallback {
-				return wrapOpenAIWSFallback("prewarm_"+fallbackReason, errors.New(errMsg))
+				return "", wrapOpenAIWSFallback("prewarm_"+fallbackReason, errors.New(errMsg))
 			}
-			return wrapOpenAIWSFallback("prewarm_error_event", errors.New(errMsg))
+			return "", wrapOpenAIWSFallback("prewarm_error_event", errors.New(errMsg))
 		}
 
 		if isOpenAIWSTerminalEvent(eventType) {
@@ -179,7 +218,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 		prewarmTerminalCount,
 		time.Since(prewarmStart).Milliseconds(),
 	)
-	return nil
+	return prewarmResponseID, nil
 }
 
 func payloadAsJSON(payload map[string]any) string {

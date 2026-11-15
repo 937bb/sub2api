@@ -584,7 +584,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			if c != nil && c.Request != nil {
 				clientHeaders = c.Request.Header
 			}
-			fpIDs := resolveCodexFingerprintIDsForAttempt(c, account, clientHeaders)
+			fpIDs := resolveCodexFingerprintIDsForAttemptBody(c, account, clientHeaders, body)
 			stageCodexFingerprintIDs(c, fpIDs)
 		}
 		if !isCompactRequest && applyCodexOutboundIdentityClientMetadataMap(c, account, decoded) {

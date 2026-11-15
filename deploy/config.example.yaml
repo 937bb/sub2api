@@ -390,8 +390,8 @@ gateway:
     # store=false 且无可复用会话连接时，是否强制新建连接（默认 true，优先会话隔离）
     # 兼容旧配置：仅在 store_disabled_conn_mode 未配置时生效
     store_disabled_force_new_conn: true
-    # 是否启用 WSv2 generate=false 预热（默认 false）
-    prewarm_generate_enabled: false
+    # 是否启用 WSv2 generate=false 预热（默认 true，与官方 Desktop 一致）
+    prewarm_generate_enabled: true
     # 协议 feature 开关，v2 优先于 v1
     responses_websockets: false
     responses_websockets_v2: true

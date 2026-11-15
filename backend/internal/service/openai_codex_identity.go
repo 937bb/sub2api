@@ -222,11 +222,11 @@ func finalizeCodexDesktopInferenceHeaders(h http.Header, compact, nativeDesktopI
 		return
 	}
 	deleteOpenAIHeaderEqualFold(h, "version")
-	// Compatibility bridges (notably B -> P) still need the stable
-	// session/conversation headers derived from prompt_cache_key. Only verified
-	// official-client ingress owns the native Desktop absence of those headers;
-	// stripping them from a bridge rotates its upstream cache namespace.
-	if !nativeDesktopIngress {
+	// Desktop uses the hyphenated Session-Id/Thread-Id pair. A compatibility
+	// bridge may initially have only legacy underscore headers, so keep those
+	// until fingerprint recovery has produced a real Session-Id. Once it has,
+	// remove the duplicate legacy aliases without dropping cache affinity.
+	if !nativeDesktopIngress && strings.TrimSpace(codexIdentityHeaderValue(h, "session-id")) == "" {
 		return
 	}
 	deleteOpenAIHeaderEqualFold(h, "session_id")

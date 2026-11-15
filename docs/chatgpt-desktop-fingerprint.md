@@ -1,6 +1,6 @@
 # ChatGPT desktop outbound identity
 
-Originally inspected on 2026-11-03 and refreshed on 2026-11-15
+Originally inspected on 2026-11-03 and refreshed on 2026-11-16
 (Asia/Shanghai), from `/Applications/ChatGPT.app`.
 The B-side default now uses the locally installed Codex Desktop profile.
 `codex_exec` remains an explicit profile for callers that intentionally need the
@@ -68,11 +68,13 @@ is claimed.
 | `X-Client-Request-ID` | Now allowed on both HTTP paths and scoped by the existing account identity logic, matching WS behavior |
 | Turn state, beta features and client metadata | Continue existing transport-specific handling; do not invent static values |
 
-Explicit UA and engine version settings retain priority. The engine version
-setting, followed by the synchronized version, controls the UA prefix. With no
-settings or synchronized version, the fallback engine is `0.167.0-alpha.3.2`,
-observed in the installed bundle. The default platform is the measured Mac OS
-26.6.2/arm64 Desktop environment.
+Explicit UA and engine version settings retain priority. The synchronized
+version follows standalone stable Codex CLI releases and therefore applies only
+to explicit CLI/TUI profiles. It must not rewrite the default Desktop profile:
+the Desktop engine and app versions are a measured bundled pair. With no
+explicit version override, the Desktop engine remains `0.167.0-alpha.3.2` and
+the app version remains `26.1103.31037`. The default platform is the measured
+Mac OS 26.6.2/arm64 Desktop environment.
 Desktop app versions remain independent when the engine version changes.
 
 See `openai-outbound-identity-audit.md` for the HTTP/WS and auxiliary-path audit.
@@ -147,6 +149,41 @@ including `analytics_enabled`, `token_provider`,
 guardian/MCP fields, `responses_api_metadata`, `traceparent`, `tracestate`, and
 `baggage`. The gateway never creates missing trace headers or promotes metadata
 values into headers. Gateway metrics remain local observability data.
+
+## November 16 app-server wire capture and cache namespace repair
+
+The bundled app-server was initialized with `clientInfo.name = Codex Desktop`,
+`clientInfo.version = 26.1103.31037` and the Desktop originator override. A
+credential-free loopback provider captured the actual request serializer. The
+sanitized fixtures are:
+
+- `backend/internal/pkg/openai/testdata/codex_desktop_appserver_http_20261116.json`
+- `backend/internal/pkg/openai/testdata/codex_desktop_appserver_ws_20261116.json`
+
+HTTP uses the measured Desktop UA/originator and header order. WS uses
+`responses_websockets=2026-02-06`, lowercase application header names and offers
+`permessage-deflate; client_max_window_bits`. Its lifecycle sends a
+`response.create` prewarm with `generate=false`; the formal request then carries
+the returned `previous_response_id` and only the input delta. The gateway now
+enables this WS v2 lifecycle by default and sends an empty delta when the formal
+request is identical to its prewarm. Prewarm handshake and frame metadata are
+normalized to `request_kind=prewarm` and omit the formal-turn-only
+`root_turn_id` and `turn_started_at_unix_ms` fields; the subsequent formal frame
+retains its original `request_kind=turn` metadata. If an internal bridge omits
+the handshake `x-codex-turn-metadata` header, the WS v2 path recovers the
+original metadata from `client_metadata` before building the upgrade. In both
+protocols `prompt_cache_key` equals the Desktop session ID. The standalone
+`X-Codex-Installation-Id` header is absent; the installation ID belongs in
+`client_metadata`.
+
+Production usage analysis also found that B-to-P bridge requests carried their
+Desktop session only in `client_metadata.session_id`,
+`client_metadata.thread_id` or `prompt_cache_key`. When the bridge omitted the
+`Session-Id` header, session-mode fingerprinting previously collapsed unrelated
+conversations into the account-wide fallback namespace. HTTP, passthrough,
+native WS and WS v2 now recover the original session from the body, preserve it
+separately across account failover and WS-to-HTTP fallback, and derive a distinct
+account-scoped namespace without hashing an already rewritten body twice.
 
 ## November 15 transport closure
 

@@ -78,6 +78,15 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		turnMetadata = strings.TrimSpace(c.GetHeader(openAIWSTurnMetadataHeader))
 	}
 	setOpenAIWSTurnMetadata(payload, applyCodexOutboundIdentityTurnMetadata(c, account, turnMetadata))
+	if turnMetadata == "" {
+		switch metadata := payload["client_metadata"].(type) {
+		case map[string]any:
+			turnMetadata, _ = metadata[openAIWSTurnMetadataHeader].(string)
+		case map[string]string:
+			turnMetadata = metadata[openAIWSTurnMetadataHeader]
+		}
+		turnMetadata = strings.TrimSpace(turnMetadata)
+	}
 	normalizeCodexUSLocaleMetadataMap(payload, account)
 	applyOpenAIWSRequestTraceMetadata(payload, c)
 	previousResponseID := openAIWSPayloadString(payload, "previous_response_id")
@@ -161,6 +170,13 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	storeDisabledConnMode := s.openAIWSStoreDisabledConnMode()
 	forceNewConnByPolicy := shouldForceNewConnOnStoreDisabled(storeDisabledConnMode, lastFailureReason)
 	forceNewConn := forceNewConnByPolicy && storeDisabled && previousResponseID == "" && sessionHash != "" && preferredConnID == ""
+	handshakeTurnMetadata := turnMetadata
+	if s.isOpenAIWSGeneratePrewarmEnabled() &&
+		decision.Transport == OpenAIUpstreamTransportResponsesWebsocketV2 &&
+		strings.TrimSpace(previousResponseID) == "" &&
+		!NeedsToolContinuation(reqBody) {
+		handshakeTurnMetadata = codexDesktopPrewarmTurnMetadata(turnMetadata)
+	}
 	wsHeaders, sessionResolution, buildHdrErr := s.buildOpenAIWSHeaders(
 		ctx,
 		c,
@@ -169,7 +185,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		decision,
 		isCodexCLI,
 		turnState,
-		turnMetadata,
+		handshakeTurnMetadata,
 		promptCacheKey,
 		openAIWSPayloadString(payload, "model"),
 		openAIWSPayloadString(payload, "service_tier"),
@@ -342,7 +358,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	s.applyOpenAICodexTurnStatePayload(c, account, payload, turnState)
 	payloadBytes = -1
 
-	if err := s.performOpenAIWSGeneratePrewarm(
+	prewarmResponseID, err := s.performOpenAIWSGeneratePrewarm(
 		ctx,
 		lease,
 		decision,
@@ -352,8 +368,19 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		account,
 		stateStore,
 		groupID,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, err
+	}
+	if prewarmResponseID != "" {
+		// Official Desktop sends the full first-turn request as generate=false,
+		// then continues from that response with only the input delta. The current
+		// request equals the prewarm request, so its delta is empty.
+		payload["previous_response_id"] = prewarmResponseID
+		payload["input"] = []any{}
+		previousResponseID = prewarmResponseID
+		previousResponseIDKind = ClassifyOpenAIPreviousResponseIDKind(prewarmResponseID)
+		payloadBytes = -1
 	}
 
 	stampOpenAIWSStreamRequestStartMS(payload, time.Now())

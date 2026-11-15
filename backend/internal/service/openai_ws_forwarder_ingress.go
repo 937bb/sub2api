@@ -332,7 +332,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if c != nil && c.Request != nil {
 			clientHeaders = c.Request.Header
 		}
-		stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttempt(c, account, clientHeaders))
+		stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttemptBody(c, account, clientHeaders, normalized))
 		identityPayload, identityChanged, identityErr := applyCodexOutboundIdentityClientMetadataRaw(c, account, normalized)
 		if identityErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", identityErr)

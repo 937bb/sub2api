@@ -14,7 +14,10 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-const codexAccountIdentitySourceContextKey = "openai_codex_account_identity_source"
+const (
+	codexAccountIdentitySourceContextKey    = "openai_codex_account_identity_source"
+	codexFingerprintClientSessionContextKey = "openai_codex_fingerprint_client_session"
+)
 
 const codexAccountIdentityLegacyNamespaceVersion = "v1"
 
@@ -126,13 +129,123 @@ func codexAccountInstallationID(account *Account) string {
 // Convergence remains a per-row policy, but a shadow must use its credential
 // owner's device just like the HTTP headers and native WS payloads do.
 func resolveCodexFingerprintIDsForAttempt(c *gin.Context, account *Account, headers http.Header) *codexFingerprintIDs {
-	ids := resolveCodexFingerprintIDsFromRequest(account, headers)
+	clientSessionID := extractClientSessionID(headers)
+	if clientSessionID == "" {
+		clientSessionID = stagedCodexFingerprintClientSessionID(c)
+	} else {
+		stageCodexFingerprintClientSessionID(c, clientSessionID)
+	}
+	return resolveCodexFingerprintIDsForAttemptSession(c, account, clientSessionID)
+}
+
+// resolveCodexFingerprintIDsForAttemptBody keeps the header-first Desktop
+// contract while recovering the same session identity from a native Responses
+// body when an internal HTTP bridge does not forward Session-Id. Without this
+// fallback, every bridged conversation on a session-mode account collapsed to
+// the account-wide legacy session and competed for one prompt-cache namespace.
+func resolveCodexFingerprintIDsForAttemptBody(c *gin.Context, account *Account, headers http.Header, body []byte) *codexFingerprintIDs {
+	clientSessionID := extractClientSessionID(headers)
+	if clientSessionID == "" {
+		clientSessionID = codexFingerprintBodySessionID(body)
+	}
+	if clientSessionID == "" {
+		clientSessionID = stagedCodexFingerprintClientSessionID(c)
+	} else {
+		stageCodexFingerprintClientSessionID(c, clientSessionID)
+	}
+	return resolveCodexFingerprintIDsForAttemptSession(c, account, clientSessionID)
+}
+
+func resolveCodexFingerprintIDsForAttemptMap(c *gin.Context, account *Account, headers http.Header, body map[string]any) *codexFingerprintIDs {
+	clientSessionID := extractClientSessionID(headers)
+	if clientSessionID == "" {
+		clientSessionID = codexFingerprintMapSessionID(body)
+	}
+	if clientSessionID == "" {
+		clientSessionID = stagedCodexFingerprintClientSessionID(c)
+	} else {
+		stageCodexFingerprintClientSessionID(c, clientSessionID)
+	}
+	return resolveCodexFingerprintIDsForAttemptSession(c, account, clientSessionID)
+}
+
+func resolveCodexFingerprintIDsForAttemptSession(c *gin.Context, account *Account, clientSessionID string) *codexFingerprintIDs {
+	if account == nil {
+		return nil
+	}
+	mode := account.GetCodexFingerprintMode()
+	if mode == codexFingerprintOff {
+		return nil
+	}
+	ids := resolveCodexFingerprintIDs(account, clientSessionID, mode)
 	if ids != nil {
 		if installationID := codexAccountInstallationID(codexAccountIdentitySource(c, account)); installationID != "" {
 			ids.installationID = installationID
 		}
 	}
 	return ids
+}
+
+func stageCodexFingerprintClientSessionID(c *gin.Context, sessionID string) {
+	if c == nil {
+		return
+	}
+	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
+		c.Set(codexFingerprintClientSessionContextKey, sessionID)
+	}
+}
+
+func stagedCodexFingerprintClientSessionID(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	value, ok := c.Get(codexFingerprintClientSessionContextKey)
+	if !ok {
+		return ""
+	}
+	sessionID, _ := value.(string)
+	return strings.TrimSpace(sessionID)
+}
+
+func codexFingerprintBodySessionID(body []byte) string {
+	if len(body) == 0 {
+		return ""
+	}
+	payload := openAIRequestPayloadView(body)
+	for _, path := range []string{
+		"client_metadata.session_id",
+		"client_metadata.thread_id",
+		"prompt_cache_key",
+	} {
+		field := payload.Get(path)
+		if field.Type != gjson.String {
+			continue
+		}
+		if value := strings.TrimSpace(field.String()); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func codexFingerprintMapSessionID(body map[string]any) string {
+	if body == nil {
+		return ""
+	}
+	if response, ok := body["response"].(map[string]any); ok {
+		body = response
+	}
+	if metadata, ok := body["client_metadata"].(map[string]any); ok {
+		for _, key := range []string{"session_id", "thread_id"} {
+			if value, ok := metadata[key].(string); ok && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	if value, ok := body["prompt_cache_key"].(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
 }
 
 // isolateOpenAIUpstreamSessionID preserves the existing API-key isolation while
@@ -436,7 +549,7 @@ func stageCodexOutboundIdentityForExistingMetadata(c *gin.Context, account *Acco
 	if c != nil && c.Request != nil {
 		clientHeaders = c.Request.Header
 	}
-	stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttempt(c, account, clientHeaders))
+	stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttemptMap(c, account, clientHeaders, requestBody))
 }
 
 // applyCodexOutboundIdentityTurnMetadata scopes one metadata blob without

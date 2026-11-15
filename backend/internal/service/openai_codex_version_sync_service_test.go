@@ -321,16 +321,14 @@ func TestGetOpenAICodexClientVersionFallsBackOnError(t *testing.T) {
 	require.Equal(t, codexCLIVersion, svc.GetOpenAICodexClientVersion(context.Background()))
 }
 
-// Without a custom UA, retain the local CLI profile and use the selected engine version.
-func TestGetOpenAICodexCanonicalUserAgentBuildsFromVersion(t *testing.T) {
+// A synchronized standalone CLI release must not create a Desktop app/engine
+// pair that was never shipped together.
+func TestGetOpenAICodexCanonicalUserAgentKeepsBundledDesktopVersion(t *testing.T) {
 	svc := NewSettingService(&codexVersionSettingRepoStub{values: map[string]string{
 		SettingKeyOpenAICodexClientVersionSynced: "0.200.1",
 	}}, nil)
 
-	require.Equal(t,
-		buildCodexCLIUserAgent("0.200.1"),
-		svc.GetOpenAICodexCanonicalUserAgent(context.Background()),
-	)
+	require.Equal(t, codexCLIUserAgent, svc.GetOpenAICodexCanonicalUserAgent(context.Background()))
 }
 
 // Keep custom client and platform fields while rebuilding the engine version.
@@ -485,7 +483,7 @@ func TestGetOpenAICodexCanonicalUserAgentOutboundIdentity(t *testing.T) {
 		{"invalid_versions", "latest", "invalid", codexCLIVersion},
 	} {
 		for _, ua := range []struct {
-			name, value, client, suffix string
+			name, value string
 		}{
 			{name: "browser", value: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"},
 			{name: "arbitrary", value: "not-a-codex-client"},
@@ -497,9 +495,9 @@ func TestGetOpenAICodexCanonicalUserAgentOutboundIdentity(t *testing.T) {
 			{name: "del", value: "codex_cli_rs/0.140.0 terminal\x7f"},
 			{name: "leading_newline", value: "\ncodex_cli_rs/0.140.0 (Linux)"},
 			{name: "trailing_newline", value: "codex_cli_rs/0.140.0 (Linux)\n"},
-			{name: "valid_suffix", value: "codex_cli_rs/0.140.0 (Mac OS X 15.1.0; arm64) iTerm.app", client: "codex_cli_rs", suffix: " (Mac OS X 15.1.0; arm64) iTerm.app"},
-			{name: "valid_tab", value: "codex_cli_rs/0.140.0 (Linux)\tterminal", client: "codex_cli_rs", suffix: " (Linux)\tterminal"},
-			{name: "recognized_trailer", value: "custom/0.140.0 (Linux) (codex-tui; 0.140.0)", client: "codex-tui", suffix: " (Linux) (codex-tui; " + version.want + ")"},
+			{name: "valid_suffix", value: "codex_cli_rs/0.140.0 (Mac OS X 15.1.0; arm64) iTerm.app"},
+			{name: "valid_tab", value: "codex_cli_rs/0.140.0 (Linux)\tterminal"},
+			{name: "recognized_trailer", value: "custom/0.140.0 (Linux) (codex-tui; 0.140.0)"},
 		} {
 			t.Run(version.name+"/"+ua.name, func(t *testing.T) {
 				svc := NewSettingService(&codexVersionSettingRepoStub{values: map[string]string{
@@ -507,13 +505,21 @@ func TestGetOpenAICodexCanonicalUserAgentOutboundIdentity(t *testing.T) {
 					SettingKeyOpenAICodexClientVersion:       version.manual,
 					SettingKeyOpenAICodexClientVersionSynced: version.synced,
 				}}, nil)
-				wantCanonicalUA := buildCodexCLIUserAgent(version.want)
+				wantVersion := version.want
+				pairedOriginator, pairedUA, paired := openai.PairCodexClientIdentity(ua.value)
+				if NormalizeCodexClientVersion(version.manual) == "" &&
+					(!paired || openai.IsCodexDesktopOriginator(pairedOriginator)) {
+					wantVersion = codexCLIVersion
+				}
+				wantCanonicalUA := buildCodexCLIUserAgent(wantVersion)
 				wantUA := wantCanonicalUA
 				wantOriginator := openai.CodexDefaultOriginator
-				if ua.client != "" {
-					wantUA = ua.client + "/" + version.want + ua.suffix
-					wantCanonicalUA = wantUA
-					wantOriginator = ua.client
+				if paired {
+					if rebuilt := openai.SetCodexUserAgentVersion(pairedUA, wantVersion); rebuilt != "" {
+						wantUA = rebuilt
+						wantCanonicalUA = rebuilt
+						wantOriginator = pairedOriginator
+					}
 				}
 				wantOriginator, wantUA, _ = openai.NormalizeCodexClientIdentityToCLI(wantOriginator, wantUA)
 				SetCodexCanonicalUserAgentResolver(func() string {
@@ -523,7 +529,7 @@ func TestGetOpenAICodexCanonicalUserAgentOutboundIdentity(t *testing.T) {
 				identity := resolveCodexOutboundIdentity("")
 				require.Equal(t, wantUA, identity.userAgent)
 				require.Equal(t, wantOriginator, identity.originator)
-				require.Equal(t, version.want, identity.version)
+				require.Equal(t, wantVersion, identity.version)
 			})
 		}
 	}

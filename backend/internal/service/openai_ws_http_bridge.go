@@ -450,8 +450,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
 	}
 	// The WS ingress parser has already rewritten the body exactly once. Refresh only
-	// the staged identity for this selected account so a failover rebuilds headers
-	// without double-mapping client_metadata or linked parent references.
+	// the staged identity for this selected account. The original client session is
+	// stored separately in the request context, so failover can rebuild the account
+	// namespace without double-mapping client_metadata or linked parent references.
 	stageCodexFingerprintIDs(c, nil)
 	if account.UsesOpenAICodexProtocol() {
 		var clientHeaders http.Header

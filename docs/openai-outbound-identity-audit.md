@@ -1,19 +1,20 @@
 # OpenAI outbound identity audit
 
-Reviewed on 2026-11-03. The release is based on production commit
-`2fa2b14b86b59d4c65737a453129b6fdf6db1ad5`; the original investigation
-workspace is retained separately. Deployment results are recorded independently.
+Reviewed through 2026-11-16. The original investigation workspace is retained
+separately. Deployment results are recorded independently.
 
 ## Identity contract
 
-The default is the locally observed `codex_exec` identity:
+The default is the locally observed ChatGPT Desktop bundled Codex identity:
 
 ```text
-codex_exec/0.166.0-alpha.5.1 (Mac OS 26.6.2; arm64) unknown (codex_exec; 0.166.0-alpha.5.1)
+Codex Desktop/0.167.0-alpha.3.2 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.1103.31037)
 ```
 
-The fallback version and platform come from the installed bundled CLI, not the
-latest stable release. Both engine-owned version fields update together.
+The fallback engine, app version and platform come from the installed Desktop
+bundle. Standalone CLI release synchronization does not rewrite this measured
+Desktop app/engine pair. An administrator can still explicitly override the
+engine version or choose a CLI/TUI profile.
 
 Runtime settings choose the engine version. An explicit account or global UA
 can select another client/platform, including Desktop. Its leading engine version
@@ -53,6 +54,24 @@ the stable cache identity and caused the observed cache collapse. Installation,
 window, session, thread and turn identifiers retain account isolation. The
 account installation policy below fixes one device per credential; additional
 session/thread convergence remains opt-in.
+
+For session-mode fingerprints, header identity remains authoritative. When an
+internal bridge omits `Session-Id`, the gateway recovers the same client session
+from `client_metadata.session_id`, then `client_metadata.thread_id`, then
+`prompt_cache_key`. The original value is retained across account failover and
+WS-to-HTTP fallback, so each selected account gets one deterministic namespace
+without collapsing conversations or re-hashing an already normalized body.
+
+WS v2 `generate=false` prewarm is enabled by default. After the prewarm terminal
+event, the formal request uses its returned `previous_response_id` and sends
+only the input delta, matching the bundled Desktop continuation lifecycle. The
+prewarm handshake and frame use `request_kind=prewarm` without
+`root_turn_id`/`turn_started_at_unix_ms`; the formal frame preserves the
+original turn metadata. When a bridge supplies turn metadata only inside
+`client_metadata`, WS v2 promotes that real value solely for handshake
+construction instead of inventing a replacement. A retry or HTTP fallback
+rebuilds from the original request body, so the hidden prewarm continuation does
+not leak onto a different transport or account.
 
 Ordinary API-key/custom-provider forwarding retains explicit header overrides.
 The existing synthetic capability probes and Codex manifest adapter continue to

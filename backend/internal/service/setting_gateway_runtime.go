@@ -110,6 +110,7 @@ type cachedOpenAICodexUserAgent struct {
 // cachedOpenAICodexClientVersion 缓存出站 Codex 客户端版本号（进程内缓存，60s TTL）
 type cachedOpenAICodexClientVersion struct {
 	version   string
+	explicit  bool
 	expiresAt int64 // unix nano
 }
 
@@ -376,6 +377,7 @@ func (s *SettingService) GetOpenAICodexClientVersion(ctx context.Context) string
 			return fallback, nil
 		}
 		version := NormalizeCodexClientVersion(values[SettingKeyOpenAICodexClientVersion])
+		explicit := version != ""
 		if version == "" {
 			version = NormalizeCodexClientVersion(values[SettingKeyOpenAICodexClientVersionSynced])
 		}
@@ -384,6 +386,7 @@ func (s *SettingService) GetOpenAICodexClientVersion(ctx context.Context) string
 		}
 		s.openAICodexVersionCache.Store(&cachedOpenAICodexClientVersion{
 			version:   version,
+			explicit:  explicit,
 			expiresAt: time.Now().Add(openAICodexClientVersionCacheTTL).UnixNano(),
 		})
 		return version, nil
@@ -512,7 +515,19 @@ func (s *SettingService) GetOpenAICodexCanonicalUserAgent(ctx context.Context) s
 	}
 	version := s.GetOpenAICodexClientVersion(ctx)
 	ua := s.GetOpenAICodexUserAgent(ctx)
-	if _, pairedUA, ok := openai.PairCodexClientIdentity(ua); ok {
+	originator, pairedUA, paired := openai.PairCodexClientIdentity(ua)
+	explicitVersion := false
+	if cached, ok := s.openAICodexVersionCache.Load().(*cachedOpenAICodexClientVersion); ok && cached != nil {
+		explicitVersion = cached.explicit
+	}
+	// The GitHub sync follows standalone stable Codex CLI releases. A Desktop
+	// UA must retain the engine bundled with its measured app build unless an
+	// operator explicitly overrides the version; mixing the latest CLI engine
+	// with an older Desktop build creates a client pair that OpenAI never shipped.
+	if !explicitVersion && (!paired || openai.IsCodexDesktopOriginator(originator)) {
+		version = openai.CodexDesktopEngineVersion
+	}
+	if paired {
 		if rebuilt := openai.SetCodexUserAgentVersion(pairedUA, version); rebuilt != "" {
 			return rebuilt
 		}

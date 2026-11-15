@@ -246,3 +246,93 @@ func TestCodexLegacyFingerprintNoHeaderKeepsWarmCacheKeyAcrossMapRawAndWSFrame(t
 		})
 	}
 }
+
+func TestCodexSessionFingerprintUsesDesktopBodySessionWhenBridgeDropsHeader(t *testing.T) {
+	seed := "11111111-1111-4111-8111-111111111111"
+	account := newTestOAuthAccount(86, map[string]any{
+		codexFingerprintModeExtraKey: "session",
+		codexFingerprintSeedExtraKey: seed,
+	})
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "Go-http-client/2.0")
+
+	resolve := func(session string) *codexFingerprintIDs {
+		body := []byte(`{"prompt_cache_key":"` + session + `","client_metadata":{"session_id":"` + session + `","thread_id":"` + session + `"}}`)
+		ids := resolveCodexFingerprintIDsForAttemptBody(c, account, c.Request.Header, body)
+		require.NotNil(t, ids)
+		require.Equal(t, resolveConvergedThreadID(seed, session), ids.sessionID)
+		require.Equal(t, ids.sessionID, ids.threadID)
+		return ids
+	}
+
+	first := resolve("019aa111-1111-7111-8111-111111111111")
+	firstAgain := resolve("019aa111-1111-7111-8111-111111111111")
+	second := resolve("019aa222-2222-7222-8222-222222222222")
+	require.Equal(t, first.sessionID, firstAgain.sessionID)
+	require.NotEqual(t, first.sessionID, second.sessionID)
+	require.NotEqual(t, resolveConvergedSessionID(seed), first.sessionID)
+}
+
+func TestCodexSessionFingerprintHeaderPrecedesDesktopBodySession(t *testing.T) {
+	account := newTestOAuthAccount(87, map[string]any{codexFingerprintModeExtraKey: "session"})
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("Session-Id", "header-session")
+	body := []byte(`{"prompt_cache_key":"body-session","client_metadata":{"session_id":"body-session"}}`)
+
+	ids := resolveCodexFingerprintIDsForAttemptBody(c, account, c.Request.Header, body)
+	require.NotNil(t, ids)
+	seed, ok := codexFingerprintSeed(account.Extra)
+	require.True(t, ok)
+	require.Equal(t, resolveConvergedThreadID(seed, "header-session"), ids.sessionID)
+}
+
+func TestCodexFingerprintBodySessionReadsWebSocketEnvelope(t *testing.T) {
+	body := []byte(`{"type":"response.create","response":{"prompt_cache_key":"ws-session","client_metadata":{"session_id":"ws-session"}}}`)
+	require.Equal(t, "ws-session", codexFingerprintBodySessionID(body))
+	require.Equal(t, "cache-session", codexFingerprintBodySessionID([]byte(`{"prompt_cache_key":"cache-session","client_metadata":{"session_id":123,"thread_id":false}}`)))
+}
+
+func TestCodexFingerprintMapSessionReadsDesktopMetadata(t *testing.T) {
+	body := map[string]any{
+		"prompt_cache_key": "cache-session",
+		"client_metadata": map[string]any{
+			"session_id": "desktop-session",
+			"thread_id":  "desktop-thread",
+		},
+	}
+	require.Equal(t, "desktop-session", codexFingerprintMapSessionID(body))
+	require.Equal(t, "desktop-session", codexFingerprintMapSessionID(map[string]any{"response": body}))
+}
+
+func TestCodexFingerprintRetainsOriginalSessionAcrossAccountFailover(t *testing.T) {
+	const clientSession = "019aa333-3333-7333-8333-333333333333"
+	firstSeed := "11111111-1111-4111-8111-111111111111"
+	secondSeed := "22222222-2222-4222-8222-222222222222"
+	first := newTestOAuthAccount(88, map[string]any{
+		codexFingerprintModeExtraKey: "session",
+		codexFingerprintSeedExtraKey: firstSeed,
+	})
+	second := newTestOAuthAccount(89, map[string]any{
+		codexFingerprintModeExtraKey: "session",
+		codexFingerprintSeedExtraKey: secondSeed,
+	})
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	body := []byte(`{"prompt_cache_key":"` + clientSession + `","client_metadata":{"session_id":"` + clientSession + `"}}`)
+
+	firstIDs := resolveCodexFingerprintIDsForAttemptBody(c, first, c.Request.Header, body)
+	require.NotNil(t, firstIDs)
+	require.Equal(t, resolveConvergedThreadID(firstSeed, clientSession), firstIDs.sessionID)
+
+	// WS -> HTTP fallback and scheduler failover rebuild account-scoped IDs after
+	// the body has already been normalized. The raw client session must survive
+	// separately so it is not lost or hashed a second time.
+	stageCodexFingerprintIDs(c, nil)
+	secondIDs := resolveCodexFingerprintIDsForAttempt(c, second, c.Request.Header)
+	require.NotNil(t, secondIDs)
+	require.Equal(t, resolveConvergedThreadID(secondSeed, clientSession), secondIDs.sessionID)
+	require.NotEqual(t, resolveConvergedSessionID(secondSeed), secondIDs.sessionID)
+	require.NotEqual(t, firstIDs.sessionID, secondIDs.sessionID)
+}

@@ -3,9 +3,11 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -14,6 +16,18 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+func codexDesktopWSWireFixture(t *testing.T) (headerNames []string, extensions string) {
+	t.Helper()
+	raw, err := os.ReadFile("../pkg/openai/testdata/codex_desktop_appserver_ws_20261116.json")
+	require.NoError(t, err)
+	var capture struct {
+		WireHeaderNames     []string `json:"wire_header_names"`
+		WebsocketExtensions string   `json:"websocket_extensions"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &capture))
+	return capture.WireHeaderNames, capture.WebsocketExtensions
+}
 
 type codexWireListener struct {
 	net.Listener
@@ -104,9 +118,11 @@ func TestCodexWSWireMatchesMeasuredUpgrade(t *testing.T) {
 		require.True(t, ok)
 		names = append(names, name)
 	}
-	// Names/order from the 2026-11-03 local bundled CLI loopback capture.
-	require.Equal(t, []string{"Host", "Connection", "Upgrade", "Sec-WebSocket-Version", "Sec-WebSocket-Key", "authorization", "user-agent", "originator", "openai-beta", "x-codex-turn-metadata", "x-codex-beta-features", "x-client-request-id", "session-id", "thread-id", "x-codex-window-id", "sec-websocket-extensions"}, names)
-	require.Equal(t, "sec-websocket-extensions: permessage-deflate; client_max_window_bits", lines[len(lines)-1])
+	// Names/order and extension offer come from the 2026-11-16 bundled Desktop
+	// app-server capture, rather than a copied CLI-era constant.
+	wantNames, wantExtensions := codexDesktopWSWireFixture(t)
+	require.Equal(t, wantNames, names)
+	require.Equal(t, "sec-websocket-extensions: "+wantExtensions, lines[len(lines)-1])
 	for range 2 {
 		require.NoError(t, conn.WriteJSON(ctx, map[string]string{"text": strings.Repeat("compressed-echo", 100)}))
 		response, err := conn.ReadMessage(ctx)

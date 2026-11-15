@@ -1360,7 +1360,7 @@ type GatewayOpenAIWSConfig struct {
 	// StoreDisabledForceNewConn: store=false 且无可复用粘连连接时是否强制新建连接（默认 true，保障会话隔离）
 	// 兼容旧配置；当 StoreDisabledConnMode 为空时才生效。
 	StoreDisabledForceNewConn bool `mapstructure:"store_disabled_force_new_conn"`
-	// PrewarmGenerateEnabled: 是否启用 WSv2 generate=false 预热（默认 false）
+	// PrewarmGenerateEnabled: 是否启用 WSv2 generate=false 预热（默认 true，与 Desktop 一致）
 	PrewarmGenerateEnabled bool `mapstructure:"prewarm_generate_enabled"`
 	// ClientReadLimitBytes: 入站客户端 WS 单帧读取上限。
 	ClientReadLimitBytes int64 `mapstructure:"client_read_limit_bytes"`
@@ -2530,7 +2530,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.ingress_previous_response_recovery_enabled", true)
 	viper.SetDefault("gateway.openai_ws.store_disabled_conn_mode", "strict")
 	viper.SetDefault("gateway.openai_ws.store_disabled_force_new_conn", true)
-	viper.SetDefault("gateway.openai_ws.prewarm_generate_enabled", false)
+	viper.SetDefault("gateway.openai_ws.prewarm_generate_enabled", true)
 	viper.SetDefault("gateway.openai_ws.client_read_limit_bytes", 64*1024*1024)
 	viper.SetDefault("gateway.openai_ws.http_bridge_enabled", true)
 	viper.SetDefault("gateway.openai_ws.http_bridge_threshold_bytes", 15*1024*1024)

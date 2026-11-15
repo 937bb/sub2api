@@ -3,15 +3,32 @@ package tlsfingerprint
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
+
+func codexDesktopHTTPWireHeaderNames(t *testing.T) []string {
+	t.Helper()
+	raw, err := os.ReadFile("../openai/testdata/codex_desktop_appserver_http_20261116.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var capture struct {
+		WireHeaderNames []string `json:"wire_header_names"`
+	}
+	if err := json.Unmarshal(raw, &capture); err != nil {
+		t.Fatal(err)
+	}
+	return capture.WireHeaderNames
+}
 
 func TestCodexNativeHTTPWireOrderAndReuse(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -71,7 +88,7 @@ func TestCodexNativeHTTPWireOrderAndReuse(t *testing.T) {
 	defer cancel()
 	headers := http.Header{"User-Agent": {"fixture-cli"}, "Accept": {"text/event-stream"}, "Authorization": {"Bearer test-only"}, "Content-Type": {"application/json"}, "Originator": {"codex_exec"}, "Session-Id": {"session"}, "Thread-Id": {"thread"}, "X-Client-Request-Id": {"request"}, "X-Codex-Beta-Features": {"remote_compaction_v2"}, "X-Codex-Turn-Metadata": {"{}"}, "X-Codex-Window-Id": {"window"}}
 	original := headers.Clone()
-	want := []string{"Host", "User-Agent", "Content-Length", "Accept", "Authorization", "Content-Type", "Originator", "Session-Id", "Thread-Id", "X-Client-Request-Id", "X-Codex-Beta-Features", "X-Codex-Turn-Metadata", "X-Codex-Window-Id"}
+	want := codexDesktopHTTPWireHeaderNames(t)
 	for range 2 {
 		r, _ := http.NewRequestWithContext(ctx, "POST", "http://"+listener.Addr().String()+"/v1/responses", strings.NewReader("{}"))
 		r.Header = headers

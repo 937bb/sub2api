@@ -226,3 +226,43 @@ func TestDesktopCompatibilityBridgeRetainsCacheIdentityHeaders(t *testing.T) {
 	require.Equal(t, codexCLIUserAgent, req.Header.Get("User-Agent"))
 	require.Equal(t, openai.CodexDesktopOriginator, req.Header.Get("Originator"))
 }
+
+func TestDesktopCompatibilityBridgeUsesNativeSessionHeadersAfterBodyRecovery(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "Go-http-client/2.0")
+	c.Set("api_key", &APIKey{ID: 1})
+
+	const clientSession = "019aa111-1111-7111-8111-111111111111"
+	account := newTestOAuthAccount(92, map[string]any{
+		codexFingerprintModeExtraKey: "session",
+		codexFingerprintSeedExtraKey: "11111111-1111-4111-8111-111111111111",
+	})
+	body := []byte(`{"model":"gpt-6.1-sol","stream":true,"prompt_cache_key":"` + clientSession + `","client_metadata":{"session_id":"` + clientSession + `","thread_id":"` + clientSession + `"},"input":[]}`)
+	svc := &OpenAIGatewayService{}
+	_, err := svc.prepareCodexAccountIdentitySource(context.Background(), c, account)
+	require.NoError(t, err)
+	stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttemptBody(c, account, c.Request.Header, body))
+	body, changed, err := applyCodexOutboundIdentityClientMetadataRaw(c, account, body)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	req, err := svc.buildUpstreamRequestOpenAIPassthrough(
+		context.Background(), c, account, body, "fixture-token",
+	)
+	require.NoError(t, err)
+
+	outboundBody, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	wantSession := gjson.GetBytes(outboundBody, "client_metadata.session_id").String()
+	wantThread := gjson.GetBytes(outboundBody, "client_metadata.thread_id").String()
+	require.NotEmpty(t, wantSession)
+	require.NotEmpty(t, wantThread)
+	require.Equal(t, wantSession, req.Header.Get("Session-Id"))
+	require.Equal(t, wantThread, req.Header.Get("Thread-Id"))
+	require.Equal(t, wantThread, req.Header.Get("X-Client-Request-Id"))
+	require.Empty(t, req.Header.Get("Session_ID"))
+	require.Empty(t, req.Header.Get("Conversation_ID"))
+	require.Equal(t, codexCLIUserAgent, req.Header.Get("User-Agent"))
+	require.Equal(t, openai.CodexDesktopOriginator, req.Header.Get("Originator"))
+}

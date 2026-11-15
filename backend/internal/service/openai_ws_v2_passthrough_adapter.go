@@ -772,7 +772,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if c != nil && c.Request != nil {
 		clientHeaders = c.Request.Header
 	}
-	stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttempt(c, account, clientHeaders))
+	stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttemptBody(c, account, clientHeaders, firstClientMessage))
 	identityFirst, identityChanged, identityErr := applyCodexOutboundIdentityClientMetadataRaw(c, account, firstClientMessage)
 	if identityErr != nil {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", identityErr)
@@ -1048,7 +1048,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					if c != nil && c.Request != nil {
 						frameHeaders = c.Request.Header
 					}
-					stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttempt(c, account, frameHeaders))
+					stageCodexFingerprintIDs(c, resolveCodexFingerprintIDsForAttemptBody(c, account, frameHeaders, payload))
 					identityPayload, identityChanged, identityErr := applyCodexOutboundIdentityClientMetadataRaw(c, account, payload)
 					if identityErr != nil {
 						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket identity metadata", identityErr)

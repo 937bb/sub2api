@@ -1495,7 +1495,7 @@ func TestOpenAIGatewayService_Forward_WSv2_GeneratePrewarm(t *testing.T) {
 		},
 	}
 
-	body := []byte(`{"model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"hello"}],"client_metadata":{"x-codex-ws-stream-request-start-ms":"1"}}`)
+	body := []byte(`{"model":"gpt-5.1","stream":false,"input":[{"type":"input_text","text":"hello"}],"client_metadata":{"turn_id":"turn-1","root_turn_id":"turn-1","x-codex-turn-metadata":"{\"request_kind\":\"turn\",\"turn_id\":\"turn-1\",\"root_turn_id\":\"turn-1\",\"turn_started_at_unix_ms\":1790000000000,\"analytics_enabled\":false}","x-codex-ws-stream-request-start-ms":"1"}}`)
 	result, err := svc.Forward(context.Background(), c, account, body)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1506,7 +1506,24 @@ func TestOpenAIGatewayService_Forward_WSv2_GeneratePrewarm(t *testing.T) {
 	secondWrite := requestToJSONString(captureConn.writes[1])
 	require.True(t, gjson.Get(firstWrite, "generate").Exists())
 	require.False(t, gjson.Get(firstWrite, "generate").Bool())
+	require.False(t, gjson.Get(firstWrite, "client_metadata.root_turn_id").Exists())
+	firstMetadata := gjson.Get(firstWrite, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, "prewarm", gjson.Get(firstMetadata, "request_kind").String())
+	require.False(t, gjson.Get(firstMetadata, "root_turn_id").Exists())
+	require.False(t, gjson.Get(firstMetadata, "turn_started_at_unix_ms").Exists())
 	require.False(t, gjson.Get(secondWrite, "generate").Exists())
+	require.Equal(t, "resp_prewarm_1", gjson.Get(secondWrite, "previous_response_id").String())
+	require.True(t, gjson.Get(secondWrite, "input").IsArray())
+	require.Empty(t, gjson.Get(secondWrite, "input").Array())
+	require.Equal(t, "turn-1", gjson.Get(secondWrite, "client_metadata.root_turn_id").String())
+	secondMetadata := gjson.Get(secondWrite, "client_metadata.x-codex-turn-metadata").String()
+	require.Equal(t, "turn", gjson.Get(secondMetadata, "request_kind").String())
+	require.Equal(t, "turn-1", gjson.Get(secondMetadata, "root_turn_id").String())
+	require.Equal(t, int64(1790000000000), gjson.Get(secondMetadata, "turn_started_at_unix_ms").Int())
+	handshakeMetadata := captureDialer.lastHeaders.Get(openAIWSTurnMetadataHeader)
+	require.Equal(t, "prewarm", gjson.Get(handshakeMetadata, "request_kind").String())
+	require.False(t, gjson.Get(handshakeMetadata, "root_turn_id").Exists())
+	require.False(t, gjson.Get(handshakeMetadata, "turn_started_at_unix_ms").Exists())
 	for _, write := range []string{firstWrite, secondWrite} {
 		require.Equal(t, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", gjson.Get(write, "client_metadata."+openAIWSRequestTraceparentMetadataKey).String())
 		require.Equal(t, "vendor=one", gjson.Get(write, "client_metadata."+openAIWSRequestTracestateMetadataKey).String())
@@ -1549,7 +1566,7 @@ func TestOpenAIGatewayService_PrewarmReadHonorsParentContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	err := svc.performOpenAIWSGeneratePrewarm(
+	_, err := svc.performOpenAIWSGeneratePrewarm(
 		ctx,
 		lease,
 		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2},
