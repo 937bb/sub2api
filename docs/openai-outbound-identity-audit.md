@@ -44,10 +44,15 @@ a deliberate opt-out for compatibility bridges.
 | Alpha search and image Responses | Existing builders plus final identity cleanup | Image forwarding no longer reintroduces legacy HTTP Beta after the builder |
 | Plugin account identity | Canonical resolver with account UA | Plugin chooses transport features |
 
-`X-Client-Request-ID`, `Session-Id`, and `Thread-Id` now pass through both HTTP allowlists and existing account
-scoping, as it already did for WS. Installation, window, session, thread and turn
-identifiers retain account isolation. The account installation policy below fixes
-one device per credential; additional session/thread convergence remains opt-in.
+`X-Client-Request-ID`, `Session-Id`, and `Thread-Id` pass through both HTTP
+allowlists and existing account scoping, as they already did for WS. A verified
+official Desktop ingress receives the measured native header cleanup. A
+compatibility bridge such as B-to-P retains its prompt-cache-derived
+`session_id`/`conversation_id`; treating the bridge as native Desktop removed
+the stable cache identity and caused the observed cache collapse. Installation,
+window, session, thread and turn identifiers retain account isolation. The
+account installation policy below fixes one device per credential; additional
+session/thread convergence remains opt-in.
 
 Ordinary API-key/custom-provider forwarding retains explicit header overrides.
 The existing synthetic capability probes and Codex manifest adapter continue to
@@ -72,7 +77,7 @@ cache keys now include all profile fields. HTTPS-only transports reject redirect
 the configured proxy. Browser defaults installed by the quota client's Firefox
 preset are removed on the local CLI branch; browser-only calls retain them.
 
-The capture used a temporary CODEX_HOME, a dummy API key and a loopback provider.
+The inference capture used a temporary CODEX_HOME, a dummy API key and a loopback provider.
 No production account was used. Supplying a custom CA changed the CLI HTTP
 backend to Rustls with ALPN h2/http1. Both `CODEX_CA_CERTIFICATE` and
 `SSL_CERT_FILE` were tested independently and select that backend. The gateway
@@ -83,7 +88,14 @@ SETTINGS (`2=0, 4=2097152, 5=16384, 6=16384`), connection WINDOW_UPDATE
 Real TLS/H2 frame tests verify negotiation and serialization; application header
 order follows the observed CLI request, with extra required OAuth fields retained.
 Native HTTP ClientHello was observed before certificate rejection; successful
-native HTTPS application traffic was not captured from the official CLI.
+native HTTPS application traffic was not captured from the unmodified official
+engine. A separate `SSL_CERT_FILE` device-auth capture negotiated HTTP/2 through
+a trusted MITM and observed `POST /api/accounts/deviceauth/usercode` with only
+`content-type`, `accept`, `content-length` and a JSON `client_id`. Configuring
+the custom trust file also changed the ClientHello to advertise
+`h2,http/1.1`, so this proves the auth request builder only under that
+instrumented transport and cannot establish the unmodified token exchange or
+refresh wire format.
 Gateway verified HTTPS and compressed WSS echo tests use a test-local trusted CA.
 
 Remaining differences:

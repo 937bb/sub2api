@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestDesktopIdentityAcrossOutboundTransports(t *testing.T) {
@@ -26,7 +28,8 @@ func TestDesktopIdentityAcrossOutboundTransports(t *testing.T) {
 					}
 					c.Request.Header.Set("Version", "9.9.9")
 					c.Request.Header.Set("OpenAI-Beta", "responses=experimental")
-					c.Request.Header.Set("User-Agent", "third-party/1.0")
+					c.Request.Header.Set("User-Agent", codexCLIUserAgent)
+					c.Request.Header.Set("Originator", openai.CodexDesktopOriginator)
 					c.Request.Header.Set("Accept-Language", "zh-CN")
 					c.Request.Header.Set("OAI-Product-Sku", "spoofed")
 					c.Request.Header.Set("X-Codex-Installation-ID", "client-installation")
@@ -194,9 +197,32 @@ func TestFinalizeCodexDesktopInferenceHeadersDoesNotAffectExplicitCLI(t *testing
 		"Conversation_id":         {"conversation"},
 		"X-Codex-Installation-Id": {"installation"},
 	}
-	finalizeCodexDesktopInferenceHeaders(h, false)
+	finalizeCodexDesktopInferenceHeaders(h, false, true)
 	require.Equal(t, "0.167.0-alpha.3.2", h.Get("Version"))
 	require.Equal(t, "session", h.Get("Session_id"))
 	require.Equal(t, "conversation", h.Get("Conversation_id"))
 	require.Equal(t, "installation", h.Get("X-Codex-Installation-Id"))
+}
+
+func TestDesktopCompatibilityBridgeRetainsCacheIdentityHeaders(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("User-Agent", "Go-http-client/2.0")
+	c.Request.Header.Set("Originator", openai.CodexDesktopOriginator)
+	c.Set("api_key", &APIKey{ID: 1})
+
+	account := accountDeviceFixture(91, "pool-owner")
+	body := []byte(`{"model":"gpt-6.1-sol","stream":true,"prompt_cache_key":"bridge-cache","input":[]}`)
+	req, err := (&OpenAIGatewayService{}).buildUpstreamRequestOpenAIPassthrough(
+		context.Background(), c, account, body, "fixture-token",
+	)
+	require.NoError(t, err)
+
+	outboundBody, err := io.ReadAll(req.Body)
+	require.NoError(t, err)
+	want := isolateOpenAIUpstreamSessionID(1, account, gjson.GetBytes(outboundBody, "prompt_cache_key").String())
+	require.Equal(t, want, req.Header.Get("Session_ID"))
+	require.Equal(t, want, req.Header.Get("Conversation_ID"))
+	require.Equal(t, codexCLIUserAgent, req.Header.Get("User-Agent"))
+	require.Equal(t, openai.CodexDesktopOriginator, req.Header.Get("Originator"))
 }

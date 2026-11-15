@@ -123,13 +123,16 @@ transport isolation changes and limitations are documented in
 
 ## November 15 Desktop protocol and telemetry refresh
 
-The canonical profile is now the installed Desktop identity shown above. Final
-standard Responses HTTP and WebSocket requests remove fields absent from the
-native Desktop inference engine: `version`, underscore `session_id`,
-`conversation_id`, underscore `thread_id`, standalone
-`x-codex-installation-id`, `accept-language`, and `OAI-Product-Sku`.
-Compact remains a unary compatibility endpoint and keeps its required
-`version`/session fields.
+The canonical profile is now the installed Desktop identity shown above. A
+request proven to originate from an official Desktop client removes fields
+absent from the measured native inference request: `version`, underscore
+`session_id`, `conversation_id`, underscore `thread_id`, standalone
+`x-codex-installation-id`, `accept-language`, and `OAI-Product-Sku`. Internal
+compatibility bridges are not native Desktop ingress. They retain the stable
+session/conversation identity derived from `prompt_cache_key`, because deleting
+that identity rotated the upstream cache namespace for B-to-P traffic. Compact
+remains a unary compatibility endpoint and keeps its required version/session
+fields.
 
 `OAI-Product-Sku: CODEX` was found in an Electron ChatGPT request helper, while
 the bundled native inference engine contains no matching string. It therefore
@@ -186,9 +189,13 @@ an existing continuation socket incompatible. A request explicitly marked as
 Real `x-openai-memgen-request` and
 `x-responsesapi-include-timing-metrics` declarations are preserved across HTTP,
 passthrough and WebSocket paths. The gateway does not invent either feature.
-Codex OAuth Requests also preserve `prompt_cache_options`; generic compatibility
-providers keep their existing unsupported-field cleanup. Each native WebSocket
-frame is stamped immediately before write with
+Codex OAuth requests preserve `prompt_cache_options` unless the selected model
+has returned an explicit unsupported-field rejection. The observed
+`gpt-6-sol` and `gpt-6.1-sol` models are stripped before dispatch so WebSocket
+requests do not fail after an unreplayable frame write; HTTP retains its bounded
+error-driven fallback for newly observed models. Generic compatibility providers
+keep their existing unsupported-field cleanup. Each native WebSocket frame is
+stamped immediately before write with
 `client_metadata.x-codex-ws-stream-request-start-ms`, as the Desktop engine does.
 
 The US Desktop locale policy defaults on. OAuth Codex metadata is normalized to
@@ -196,11 +203,16 @@ The US Desktop locale policy defaults on. OAuth Codex metadata is normalized to
 setting; the policy still does not synthesize timezone headers or alter user
 content outside the structured environment context.
 
-The bundled engine's device-auth bootstrap ClientHello was captured on
-2026-11-16 through a local CONNECT proxy with an isolated home and no
-credentials. It exactly matches the measured native HTTP profile and offers no
-ALPN. Direct token exchange and refresh requests already select that profile
-when the canonical Desktop UA is present. The token POST's HTTP version, header
-order and form serialization remain unmeasured. OpenAI OAuth requests handled
-by an external outbound plugin still use the plugin's own transport and require
-a separate audit.
+The bundled engine's unmodified device-auth bootstrap ClientHello was captured
+on 2026-11-16 through a local CONNECT proxy with an isolated home and no
+credentials. It matches the measured native HTTP profile and offers no ALPN.
+With `SSL_CERT_FILE` configured, the same executable changes its ClientHello and
+offers `h2,http/1.1`; a trusted local MITM then observed HTTP/2
+`POST /api/accounts/deviceauth/usercode`, with wire-order application headers
+`content-type`, `accept`, `content-length`, no User-Agent, and a JSON body whose
+only field is `client_id`. The trusted-MITM evidence is instrumented behavior:
+the custom CA changes the transport profile, so it does not prove unmodified
+Desktop uses HTTP/2. Token exchange and refresh HTTP version, header order and
+serialization remain unmeasured. OpenAI OAuth requests handled by an external
+outbound plugin still use the plugin's own transport and require a separate
+audit.

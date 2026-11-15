@@ -101,7 +101,9 @@ def parse_client_hello(record_header, payload):
     }
 
 
-def capture(cli, mode):
+def capture(cli, mode, ssl_cert_file=None):
+    if ssl_cert_file is not None:
+        ssl_cert_file = ssl_cert_file.resolve()
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.bind(("127.0.0.1", 0))
@@ -163,10 +165,12 @@ log_user_prompt=false
         )
         env = {key: os.environ[key] for key in ("PATH", "TMPDIR", "LANG") if key in os.environ}
         env.update(CODEX_HOME=directory, CAPTURE_API_KEY="loopback-only")
+        if ssl_cert_file is not None:
+            env["SSL_CERT_FILE"] = str(ssl_cert_file)
         if mode == "auth":
             proxy = f"http://127.0.0.1:{port}"
             env.update(HTTPS_PROXY=proxy, HTTP_PROXY=proxy, ALL_PROXY=proxy, NO_PROXY="")
-        elif mode == "custom-ca":
+        elif mode == "custom-ca" and ssl_cert_file is None:
             env["SSL_CERT_FILE"] = "/etc/ssl/cert.pem"
         command = [str(cli), "login", "--device-auth"] if mode == "auth" else [
             str(cli), "exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "Reply only OK."
@@ -205,6 +209,7 @@ log_user_prompt=false
             else "Bundled Codex native engine; isolated home, loopback provider, dummy API key"
         ),
         limits=["First ClientHello only", "No TLS session resumption measurement"],
+        ssl_cert_file_configured=ssl_cert_file is not None,
     )
     return result
 
@@ -217,9 +222,12 @@ def main():
         type=Path,
         default=Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"),
     )
+    parser.add_argument("--ssl-cert-file", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    observed = capture(args.cli, args.mode)
+    if args.ssl_cert_file is not None and not args.ssl_cert_file.is_file():
+        parser.error(f"--ssl-cert-file is not a file: {args.ssl_cert_file}")
+    observed = capture(args.cli, args.mode, args.ssl_cert_file)
     args.output.write_text(json.dumps(observed, indent=2) + "\n")
     print(json.dumps({"mode": args.mode, "output": str(args.output), "sha256": observed["native_cli_sha256"]}))
 

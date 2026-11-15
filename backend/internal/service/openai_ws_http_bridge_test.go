@@ -2383,10 +2383,11 @@ func TestProxyOpenAIWSHTTPBridgeTurn_StagesCodexFingerprint(t *testing.T) {
 	ids := resolveCodexFingerprintIDsFromRequest(full, nil)
 	require.NotNil(t, ids)
 	first := run(full)
-	require.Empty(t, first.Header.Get("session_id"))
+	require.NotEmpty(t, first.Header.Get("session_id"))
 	require.Empty(t, first.Header.Get("x-codex-installation-id"))
-	// The HTTP bridge uses the same Desktop wire contract as ordinary Responses.
-	require.Empty(t, run(full).Header.Get("session_id"))
+	// The bridge keeps a stable cache namespace while retaining the remaining
+	// Desktop wire contract.
+	require.Equal(t, first.Header.Get("session_id"), run(full).Header.Get("session_id"))
 
 	off := newTestOAuthAccount(7102, map[string]any{"codex_fingerprint_mode": "off"})
 	require.Empty(t, run(off).Header.Get("session_id"), "accounts without convergence get no session_id")

@@ -201,7 +201,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeaders(
 	)
 	if account != nil && account.UsesOpenAICodexProtocol() {
 		applyCodexUSLocaleHeaders(headers)
-		finalizeCodexDesktopInferenceHeaders(headers, false)
+		finalizeCodexDesktopInferenceHeaders(headers, false, isOfficialCodexClientIngress(c))
 		// Native Codex WS connects with turn_state=None. The opaque value is
 		// attached to each response.create frame's client_metadata instead.
 		headers.Del(openAICodexTurnStateHeader)

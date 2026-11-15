@@ -177,7 +177,7 @@ func TestCodexAccountIdentitySourceResolvesShadowAndOverwritesFailoverContext(t 
 		"token", true, "client-session", true,
 	)
 	require.NoError(t, err)
-	require.Empty(t, req.Header.Get("session_id"))
+	require.NotEmpty(t, req.Header.Get("session_id"))
 
 	next := &Account{ID: 19, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Credentials: map[string]any{
 		"chatgpt_account_id": "other-account",
@@ -216,7 +216,7 @@ func TestBuildOpenAIWSHeadersNamespacesCodexIdentityByOAuthAccount(t *testing.T)
 	first := build(account11)
 	firstAgain := build(account11)
 	second := build(account19)
-	require.Empty(t, first.Get("session_id"))
+	require.NotEmpty(t, first.Get("session_id"))
 	require.Empty(t, first.Get("x-codex-installation-id"))
 	for _, header := range []string{"thread-id", "x-codex-window-id", "x-client-request-id"} {
 		require.NotEmpty(t, first.Get(header), header)

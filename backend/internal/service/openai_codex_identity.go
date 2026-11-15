@@ -206,7 +206,7 @@ func enforceCodexIdentityHeadersWithUA(h http.Header, overrideUA string) {
 // keeps its unary compatibility fields. OAI-Product-Sku belongs to Electron
 // ChatGPT helpers; it is absent from the native inference engine and must not be
 // synthesized here.
-func finalizeCodexDesktopInferenceHeaders(h http.Header, compact bool) {
+func finalizeCodexDesktopInferenceHeaders(h http.Header, compact, nativeDesktopIngress bool) {
 	if h == nil {
 		return
 	}
@@ -222,6 +222,13 @@ func finalizeCodexDesktopInferenceHeaders(h http.Header, compact bool) {
 		return
 	}
 	deleteOpenAIHeaderEqualFold(h, "version")
+	// Compatibility bridges (notably B -> P) still need the stable
+	// session/conversation headers derived from prompt_cache_key. Only verified
+	// official-client ingress owns the native Desktop absence of those headers;
+	// stripping them from a bridge rotates its upstream cache namespace.
+	if !nativeDesktopIngress {
+		return
+	}
 	deleteOpenAIHeaderEqualFold(h, "session_id")
 	deleteOpenAIHeaderEqualFold(h, "conversation_id")
 }

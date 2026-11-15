@@ -943,7 +943,7 @@ func TestBuildUpstreamRequestOpenAIPassthrough_OffModeKeepsIsolatedSession(t *te
 	req, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "test-token")
 	require.NoError(t, err)
 
-	assert.Empty(t, req.Header.Get("session_id"))
+	assert.NotEmpty(t, req.Header.Get("session_id"), "off mode keeps an isolated compatibility cache session")
 	assert.Empty(t, req.Header.Get("session-id"), "off 模式不得凭空生成 Desktop session-id")
 	assert.Empty(t, req.Header.Get("x-codex-window-id"))
 }

@@ -710,7 +710,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http_passthrough", req.Header, body, "not_applicable")
 	if account.UsesOpenAICodexProtocol() {
 		applyCodexUSLocaleHeaders(req.Header)
-		finalizeCodexDesktopInferenceHeaders(req.Header, isOpenAIResponsesCompactPath(c))
+		finalizeCodexDesktopInferenceHeaders(
+			req.Header,
+			isOpenAIResponsesCompactPath(c),
+			isOfficialCodexClientIngress(c),
+		)
 	}
 
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {

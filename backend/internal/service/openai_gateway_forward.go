@@ -757,6 +757,23 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			requestView = newOpenAIRequestView(body)
 		}
 	}
+	if account.UsesOpenAICodexProtocol() {
+		compatibleBody, changed, compatibilityErr := stripUnsupportedOpenAIPromptCacheOptions(body, upstreamModel)
+		if compatibilityErr != nil {
+			return nil, compatibilityErr
+		}
+		if changed {
+			body = compatibleBody
+			requestView = newOpenAIRequestView(body)
+			reqBody = nil
+			logger.LegacyPrintf(
+				"service.openai_gateway",
+				"[OpenAI] Removed unsupported prompt_cache_options before dispatch (account: %s, model: %s)",
+				account.Name,
+				upstreamModel,
+			)
+		}
+	}
 	// Run after orphan-output filtering and all request-map rebuilds so a
 	// compaction trigger cannot remain ahead of surviving history items.
 	if normalizedBody, changed, normalizeErr := NormalizeCompactionTriggerInputOrder(body); normalizeErr != nil {
@@ -1563,7 +1580,11 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	logOpenAIRoutingDiagnosticsFromBody(ctx, account, "http", req.Header, body, "not_applicable")
 	if account.UsesOpenAICodexProtocol() {
 		applyCodexUSLocaleHeaders(req.Header)
-		finalizeCodexDesktopInferenceHeaders(req.Header, isOpenAIResponsesCompactPath(c))
+		finalizeCodexDesktopInferenceHeaders(
+			req.Header,
+			isOpenAIResponsesCompactPath(c),
+			isOfficialCodexClientIngress(c),
+		)
 	}
 
 	if err := applyMappedGPT55LiteCompatibility(req, account, body); err != nil {

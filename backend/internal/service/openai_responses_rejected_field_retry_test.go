@@ -140,6 +140,22 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyKeepsPromptCacheOptionsOn
 	require.Nil(t, retryBody)
 }
 
+func TestStripUnsupportedOpenAIPromptCacheOptionsUsesObservedModelList(t *testing.T) {
+	body := []byte(`{"model":"public","prompt_cache_options":{"ttl":"24h"},"input":[]}`)
+	for _, model := range []string{"gpt-6-sol", "gpt-6.1-sol"} {
+		next, changed, err := stripUnsupportedOpenAIPromptCacheOptions(body, model)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.False(t, gjson.GetBytes(next, "prompt_cache_options").Exists())
+	}
+	for _, model := range []string{"gpt-5.6-sol", "gpt-6-astra", "gpt-6-luna", ""} {
+		next, changed, err := stripUnsupportedOpenAIPromptCacheOptions(body, model)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.Equal(t, body, next)
+	}
+}
+
 func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyDoesNotGuessAutomationRootType(t *testing.T) {
 	body := []byte(`{"tools":[{"type":"function","name":"automation_update","parameters":{"oneOf":[{"type":"object"}]}}]}`)
 	tests := []string{

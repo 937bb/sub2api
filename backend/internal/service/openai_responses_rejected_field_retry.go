@@ -16,6 +16,31 @@ import (
 
 const maxOpenAIResponsesRejectedFieldRetries = 6
 
+// These native Codex models have returned an explicit
+// "prompt_cache_options is not supported on this model" rejection in
+// production. HTTP can recover after the response, but WS cannot safely replay
+// a frame once it has been dispatched, so remove the field before either
+// transport sends it. Extend this list only from an observed model rejection.
+func openAIModelRejectsPromptCacheOptions(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "gpt-6-sol", "gpt-6.1-sol":
+		return true
+	default:
+		return false
+	}
+}
+
+func stripUnsupportedOpenAIPromptCacheOptions(body []byte, model string) ([]byte, bool, error) {
+	if !openAIModelRejectsPromptCacheOptions(model) || !gjson.GetBytes(body, "prompt_cache_options").Exists() {
+		return body, false, nil
+	}
+	next, err := sjson.DeleteBytes(body, "prompt_cache_options")
+	if err != nil {
+		return body, false, fmt.Errorf("delete unsupported prompt_cache_options: %w", err)
+	}
+	return next, true, nil
+}
+
 var (
 	openAIResponsesRejectedNamespaceParamPattern  = regexp.MustCompile(`(?i)^input\[(\d+)\]\.namespace$`)
 	openAIResponsesRejectedStatusParamPattern     = regexp.MustCompile(`(?i)^input\[(\d+)\]\.status$`)
