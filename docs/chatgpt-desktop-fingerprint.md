@@ -196,8 +196,11 @@ The US Desktop locale policy defaults on. OAuth Codex metadata is normalized to
 setting; the policy still does not synthesize timezone headers or alter user
 content outside the structured environment context.
 
-OAuth token exchange and refresh remain outside the measured inference
-transport evidence. Their canonical Desktop application headers are aligned,
-but their TLS and HTTP wire shape has not been captured from a real Desktop
-OAuth flow. OpenAI OAuth requests handled by an external outbound plugin also
-use the plugin's own transport and require a separate audit.
+The bundled engine's device-auth bootstrap ClientHello was captured on
+2026-11-16 through a local CONNECT proxy with an isolated home and no
+credentials. It exactly matches the measured native HTTP profile and offers no
+ALPN. Direct token exchange and refresh requests already select that profile
+when the canonical Desktop UA is present. The token POST's HTTP version, header
+order and form serialization remain unmeasured. OpenAI OAuth requests handled
+by an external outbound plugin still use the plugin's own transport and require
+a separate audit.

@@ -101,6 +101,11 @@ func newCodexFingerprintSeed() string {
 	return uuid.Must(uuid.NewV7()).String()
 }
 
+func usesLegacyCodexFingerprintSeed(seed string) bool {
+	parsed, err := uuid.Parse(strings.TrimSpace(seed))
+	return err == nil && parsed.Version() != uuid.Version(7)
+}
+
 func stripCodexFingerprintSeed(extra map[string]any) map[string]any {
 	if extra == nil {
 		return nil
@@ -295,6 +300,9 @@ func resolveConvergedInstallationID(account *Account, seed string) string {
 	if seed == "" {
 		return ""
 	}
+	if usesLegacyCodexFingerprintSeed(seed) {
+		return deriveLegacyCodexUUIDv4("sub2api:codex-install-id:v2:" + seed)
+	}
 	return deriveStableUUIDv7("sub2api:codex-install-id:v3:" + seed)
 }
 
@@ -302,6 +310,9 @@ func resolveConvergedInstallationID(account *Account, seed string) string {
 func resolveConvergedSessionID(seed string) string {
 	if seed == "" {
 		return ""
+	}
+	if usesLegacyCodexFingerprintSeed(seed) {
+		return deriveLegacyCodexUUIDv4("sub2api:codex-session-id:v2:" + seed)
 	}
 	return deriveStableUUIDv7("sub2api:codex-session-id:v3:" + seed)
 }
@@ -312,6 +323,9 @@ func resolveConvergedSessionID(seed string) string {
 func resolveConvergedThreadID(seed, clientSessionID string) string {
 	if seed == "" || clientSessionID == "" {
 		return ""
+	}
+	if usesLegacyCodexFingerprintSeed(seed) {
+		return deriveLegacyCodexUUIDv4("sub2api:codex-thread-id:v2:" + seed + ":" + clientSessionID)
 	}
 	return deriveScopedUUIDv7("sub2api:codex-thread-id:v3:"+seed, clientSessionID)
 }

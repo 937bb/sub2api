@@ -203,3 +203,46 @@ func TestCodexCompatIdentityDoesNotInventDesktopMetadata(t *testing.T) {
 	require.True(t, applyCodexOutboundIdentityClientMetadataMap(c, account, desktop))
 	require.NotEqual(t, "desktop-thread", gjson.Get(requestToJSONString(desktop), "client_metadata.thread_id").String())
 }
+
+func TestCodexLegacyFingerprintNoHeaderKeepsWarmCacheKeyAcrossMapRawAndWSFrame(t *testing.T) {
+	seed := "11111111-1111-4111-8111-111111111111"
+	account := newTestOAuthAccount(85, map[string]any{
+		codexFingerprintModeExtraKey: "session",
+		codexFingerprintSeedExtraKey: seed,
+	})
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	want := deriveLegacyCodexUUIDv4("sub2api:codex-session-id:v2:" + seed)
+	stage := func() {
+		ids := resolveCodexFingerprintIDsForAttempt(c, account, c.Request.Header)
+		require.NotNil(t, ids)
+		require.Equal(t, want, ids.sessionID)
+		stageCodexFingerprintIDs(c, ids)
+	}
+
+	stage()
+	httpMap := map[string]any{
+		"prompt_cache_key": "body-session",
+		"client_metadata":  map[string]any{"session_id": "body-session"},
+	}
+	require.True(t, applyCodexOutboundIdentityClientMetadataMap(c, account, httpMap))
+	require.Equal(t, want, httpMap["prompt_cache_key"])
+
+	for _, tc := range []struct {
+		name string
+		body []byte
+	}{
+		{name: "raw passthrough", body: []byte(`{"prompt_cache_key":"body-session","client_metadata":{"session_id":"body-session"}}`)},
+		{name: "websocket response.create", body: []byte(`{"type":"response.create","prompt_cache_key":"body-session","client_metadata":{"session_id":"body-session"}}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stage()
+			out, changed, err := applyCodexOutboundIdentityClientMetadataRaw(c, account, tc.body)
+			require.NoError(t, err)
+			require.True(t, changed)
+			require.Equal(t, want, gjson.GetBytes(out, "prompt_cache_key").String())
+			require.Equal(t, want, gjson.GetBytes(out, "client_metadata.session_id").String())
+		})
+	}
+}

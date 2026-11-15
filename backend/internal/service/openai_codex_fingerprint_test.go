@@ -129,6 +129,27 @@ func TestResolveConvergedThreadID_EmptySession(t *testing.T) {
 	assert.Equal(t, "", resolveConvergedThreadID(testCodexFingerprintSeed, ""))
 }
 
+func TestLegacyFingerprintSeedRetainsPreDesktopCacheNamespaces(t *testing.T) {
+	seed := "11111111-1111-4111-8111-111111111111"
+	account := newTestOAuthAccount(42, map[string]any{
+		codexFingerprintSeedExtraKey: seed,
+	})
+
+	require.True(t, usesLegacyCodexFingerprintSeed(seed))
+	require.Equal(t,
+		deriveLegacyCodexUUIDv4("sub2api:codex-install-id:v2:"+seed),
+		resolveConvergedInstallationID(account, seed),
+	)
+	require.Equal(t,
+		deriveLegacyCodexUUIDv4("sub2api:codex-session-id:v2:"+seed),
+		resolveConvergedSessionID(seed),
+	)
+	require.Equal(t,
+		deriveLegacyCodexUUIDv4("sub2api:codex-thread-id:v2:"+seed+":client-session"),
+		resolveConvergedThreadID(seed, "client-session"),
+	)
+}
+
 // --- off 模式：resolveCodexFingerprintIDsFromRequest 返回 nil ---
 
 func TestResolveCodexFingerprintIDsFromRequest_ExplicitOff(t *testing.T) {

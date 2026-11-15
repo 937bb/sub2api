@@ -113,6 +113,33 @@ func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRepairsAutomationMissingR
 	require.Equal(t, "object", gjson.GetBytes(retryBody, "tools.0.parameters.type").String())
 }
 
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyRemovesUnsupportedPromptCacheOptions(t *testing.T) {
+	body := []byte(`{"model":"gpt-6.1-sol","prompt_cache_options":{"ttl":"24h"},"input":[]}`)
+	responses := [][]byte{
+		[]byte(`{"error":{"code":"invalid_parameter","message":"prompt_cache_options is not supported on this model","param":"prompt_cache_options","type":"invalid_request_error"}}`),
+		[]byte(`{"error":{"code":"invalid_parameter","message":"'prompt_cache_options' is not supported on this model","type":"invalid_request_error"}}`),
+	}
+
+	for _, responseBody := range responses {
+		retryBody, reason, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+		require.NoError(t, err)
+		require.True(t, changed)
+		require.Equal(t, "prompt_cache_options model rejection", reason)
+		require.False(t, gjson.GetBytes(retryBody, "prompt_cache_options").Exists())
+		require.Equal(t, "gpt-6.1-sol", gjson.GetBytes(retryBody, "model").String())
+	}
+}
+
+func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyKeepsPromptCacheOptionsOnAmbiguousError(t *testing.T) {
+	body := []byte(`{"prompt_cache_options":{"ttl":"24h"}}`)
+	responseBody := []byte(`{"error":{"code":"invalid_request_error","message":"prompt_cache_options.ttl must be positive","param":"prompt_cache_options"}}`)
+
+	retryBody, _, changed, err := normalizeOpenAIResponsesRejectedFieldRetryBody(http.StatusBadRequest, body, responseBody)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Nil(t, retryBody)
+}
+
 func TestNormalizeOpenAIResponsesRejectedFieldRetryBodyDoesNotGuessAutomationRootType(t *testing.T) {
 	body := []byte(`{"tools":[{"type":"function","name":"automation_update","parameters":{"oneOf":[{"type":"object"}]}}]}`)
 	tests := []string{

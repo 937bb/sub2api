@@ -31,8 +31,7 @@ func usesLegacyCodexAccountIdentity(account *Account) bool {
 	if !ok {
 		return false
 	}
-	parsed, err := uuid.Parse(seed)
-	return err == nil && parsed.Version() != uuid.Version(7)
+	return usesLegacyCodexFingerprintSeed(seed)
 }
 
 func deriveLegacyCodexUUIDv4(value string) string {

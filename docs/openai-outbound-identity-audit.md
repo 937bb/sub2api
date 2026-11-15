@@ -37,7 +37,7 @@ a deliberate opt-out for compatibility bridges.
 | Responses WS v1/v2, pooled and passthrough | Shared WS header builder | Each handshake retains its own Beta value |
 | WS retries, reconnects and prewarm | Same builder and pool compatibility | UA, originator, version, protocol Beta, account/FedRAMP, URL and proxy constrain reuse |
 | Live setup and sideband | Same resolver with account UA | `quicksilver=v2`; no Responses Beta |
-| OAuth token exchange/refresh and PAT | Shared canonical auth pair | No inference version header |
+| OAuth token exchange/refresh and PAT | Shared canonical auth pair; measured native HTTP TLS profile for direct auth transport | No inference version header; token POST HTTP ordering remains unmeasured |
 | Quota query/reset | Removed hardcoded Desktop originator; configured UA/account override | Keep endpoint `codex-1` and language; remove synthesized browser fetch hints |
 | Codex model manifest | UA and Version share engine version | Preserve independent `client_version` content-negotiation query |
 | Account/capability probes | Finalize identity, rather than only fill missing fields | No generic helper overwrites transport Beta |
