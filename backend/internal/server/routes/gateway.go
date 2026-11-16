@@ -184,6 +184,9 @@ func RegisterGatewayRoutes(
 	gateway.Use(endpointNorm)
 	gateway.Use(gin.HandlerFunc(apiKeyAuth))
 	gateway.GET("/sub2api/billing", h.Gateway.KeyBillingInfo)
+	// Codex Desktop API-key providers query per-turn costs without a model.
+	// Keep this authenticated but outside model allowlisting and scheduling.
+	gateway.POST("/analytics/codex/turn-costs", h.OpenAIGateway.CodexTurnCosts)
 	gateway.Use(groupModelAllowlist)
 	gateway.Use(compositeTarget)
 	gateway.Use(requireGroupAnthropic)

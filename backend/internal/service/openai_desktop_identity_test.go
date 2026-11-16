@@ -119,6 +119,37 @@ func TestDesktopIdentityAcrossOutboundTransports(t *testing.T) {
 	}
 }
 
+func TestDesktopTraceContextPreservesHTTPEmptyTracestateAndOmitsItFromWSFrames(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Request.Header.Set("Traceparent", "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01")
+	c.Request.Header["Tracestate"] = []string{""}
+
+	svc := &OpenAIGatewayService{}
+	account := &Account{
+		ID:       91,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "fixture-account",
+		},
+	}
+	req, err := svc.buildUpstreamRequest(
+		context.Background(), c, account,
+		[]byte(`{"model":"gpt-5","input":[]}`),
+		"fixture-token", true, "", false,
+	)
+	require.NoError(t, err)
+	require.Equal(t, []string{""}, req.Header.Values("Tracestate"))
+
+	payload := map[string]any{"type": "response.create", "client_metadata": map[string]any{}}
+	require.True(t, applyOpenAIWSRequestTraceMetadata(payload, c))
+	metadata := payload["client_metadata"].(map[string]any)
+	require.Equal(t, c.Request.Header.Get("Traceparent"), metadata[openAIWSRequestTraceparentMetadataKey])
+	_, hasTracestate := metadata[openAIWSRequestTracestateMetadataKey]
+	require.False(t, hasTracestate)
+}
+
 func TestDesktopIdentityVersionSettingsAndAuth(t *testing.T) {
 	svc := NewSettingService(&codexVersionSettingRepoStub{values: map[string]string{
 		SettingKeyOpenAICodexClientVersion: "0.200.1",

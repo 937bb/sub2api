@@ -76,6 +76,40 @@ func TestGatewayRoutesOpenAIResponsesCompactPathIsRegistered(t *testing.T) {
 	}
 }
 
+func TestGatewayRoutesCodexTurnCostsIsAuthenticatedAndModelIndependent(t *testing.T) {
+	router := newGatewayRoutesTestRouter()
+	req := httptest.NewRequest(http.MethodPost, "/v1/analytics/codex/turn-costs", strings.NewReader(`{"turn_ids":["turn-fixture"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.JSONEq(t, `{"turns":[]}`, w.Body.String())
+
+	gin.SetMode(gin.TestMode)
+	protected := gin.New()
+	authCalled := false
+	RegisterGatewayRoutes(
+		protected,
+		&handler.Handlers{
+			Gateway:       &handler.GatewayHandler{},
+			OpenAIGateway: &handler.OpenAIGatewayHandler{},
+			AsyncImage:    handler.NewAsyncImageHandler(nil, nil),
+		},
+		servermiddleware.APIKeyAuthMiddleware(func(c *gin.Context) {
+			authCalled = true
+			c.AbortWithStatus(http.StatusUnauthorized)
+		}),
+		nil, nil, nil, nil, nil,
+		&config.Config{Gateway: config.GatewayConfig{MaxBodySize: 1024 * 1024, TextMaxBodySize: 1024 * 1024}},
+	)
+	blocked := httptest.NewRecorder()
+	protected.ServeHTTP(blocked, httptest.NewRequest(http.MethodPost, "/v1/analytics/codex/turn-costs", strings.NewReader(`{"turn_ids":[]}`)))
+	require.True(t, authCalled)
+	require.Equal(t, http.StatusUnauthorized, blocked.Code)
+}
+
 func TestGatewayRoutesOpenAIAlphaSearchPathsAreRegistered(t *testing.T) {
 	router := newGatewayRoutesTestRouter()
 	registered := make(map[string]bool)

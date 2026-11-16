@@ -47,6 +47,35 @@ type codexDesktopAppServerFixture struct {
 	} `json:"turn"`
 }
 
+type codexDesktopTelemetryFixture struct {
+	AppVersion    string `json:"app_version"`
+	EngineVersion string `json:"engine_version"`
+	HTTPInference struct {
+		TraceparentPresent              bool `json:"traceparent_present"`
+		EmptyTracestateHeaderPresent    bool `json:"empty_tracestate_header_present"`
+		TraceIDMatchesExportedTelemetry bool `json:"trace_id_matches_exported_telemetry"`
+	} `json:"http_inference"`
+	WebSocketInference struct {
+		HandshakeTraceHeadersPresent    bool   `json:"handshake_trace_headers_present"`
+		FrameTraceparentField           string `json:"frame_traceparent_field"`
+		EmptyFrameTracestateOmitted     bool   `json:"empty_frame_tracestate_omitted"`
+		TraceIDMatchesExportedTelemetry bool   `json:"trace_id_matches_exported_telemetry"`
+	} `json:"websocket_inference"`
+	TurnCosts struct {
+		Method                  string   `json:"method"`
+		Path                    string   `json:"path"`
+		WireHeaderNames         []string `json:"wire_header_names"`
+		BodyFields              []string `json:"body_fields"`
+		TraceHeadersPresent     bool     `json:"trace_headers_present"`
+		CompatibleEmptyResponse struct {
+			Turns []any `json:"turns"`
+		} `json:"compatible_empty_response"`
+	} `json:"turn_costs"`
+	OTLPResource          map[string]string `json:"otlp_resource"`
+	OTLPScopes            []string          `json:"otlp_scopes"`
+	RepresentativeMetrics []string          `json:"representative_metrics"`
+}
+
 func readCodexDesktopAppServerFixture(t *testing.T, name string) codexDesktopAppServerFixture {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/" + name)
@@ -108,4 +137,30 @@ func TestCodexDesktopAppServerRequestRelationships(t *testing.T) {
 	require.False(t, *wsFixture.Turn.AnalyticsEnabled)
 	require.Contains(t, wsFixture.Turn.ClientMetadata, "root_turn_id")
 	require.Contains(t, wsFixture.Turn.TurnMetadataFields, "turn_started_at_unix_ms")
+}
+
+func TestCodexDesktopTelemetryFixture(t *testing.T) {
+	raw, err := os.ReadFile("testdata/codex_desktop_telemetry_20261116.json")
+	require.NoError(t, err)
+	var fixture codexDesktopTelemetryFixture
+	require.NoError(t, json.Unmarshal(raw, &fixture))
+	require.Equal(t, CodexDesktopAppVersion, fixture.AppVersion)
+	require.Equal(t, CodexDesktopEngineVersion, fixture.EngineVersion)
+	require.True(t, fixture.HTTPInference.TraceparentPresent)
+	require.True(t, fixture.HTTPInference.EmptyTracestateHeaderPresent)
+	require.True(t, fixture.HTTPInference.TraceIDMatchesExportedTelemetry)
+	require.False(t, fixture.WebSocketInference.HandshakeTraceHeadersPresent)
+	require.Equal(t, "ws_request_header_traceparent", fixture.WebSocketInference.FrameTraceparentField)
+	require.True(t, fixture.WebSocketInference.EmptyFrameTracestateOmitted)
+	require.True(t, fixture.WebSocketInference.TraceIDMatchesExportedTelemetry)
+	require.Equal(t, "POST", fixture.TurnCosts.Method)
+	require.Equal(t, "/v1/analytics/codex/turn-costs", fixture.TurnCosts.Path)
+	require.Equal(t, []string{"turn_ids"}, fixture.TurnCosts.BodyFields)
+	require.False(t, fixture.TurnCosts.TraceHeadersPresent)
+	require.NotNil(t, fixture.TurnCosts.CompatibleEmptyResponse.Turns)
+	require.Empty(t, fixture.TurnCosts.CompatibleEmptyResponse.Turns)
+	require.Equal(t, "codex-app-server", fixture.OTLPResource["service.name"])
+	require.Equal(t, CodexDesktopEngineVersion, fixture.OTLPResource["service.version"])
+	require.Contains(t, fixture.OTLPScopes, "codex-app-server")
+	require.Contains(t, fixture.RepresentativeMetrics, "codex.websocket.continuation")
 }

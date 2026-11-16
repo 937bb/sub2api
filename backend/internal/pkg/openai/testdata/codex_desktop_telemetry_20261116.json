@@ -1,0 +1,58 @@
+{
+  "source": "bundled Codex app-server initialized by ChatGPT Desktop with local OTLP exporters",
+  "app_version": "26.1103.31037",
+  "engine_version": "0.167.0-alpha.3.2",
+  "native_cli_sha256": "a636331ed87605efc4cf84028ac2884a75363f9d10ead63cffb57ea0016d486e",
+  "http_inference": {
+    "traceparent_present": true,
+    "empty_tracestate_header_present": true,
+    "trace_id_matches_exported_telemetry": true
+  },
+  "websocket_inference": {
+    "handshake_trace_headers_present": false,
+    "frame_traceparent_field": "ws_request_header_traceparent",
+    "empty_frame_tracestate_omitted": true,
+    "trace_id_matches_exported_telemetry": true
+  },
+  "turn_costs": {
+    "method": "POST",
+    "path": "/v1/analytics/codex/turn-costs",
+    "wire_header_names": [
+      "host",
+      "user-agent",
+      "content-length",
+      "accept",
+      "authorization",
+      "content-type"
+    ],
+    "body_fields": ["turn_ids"],
+    "trace_headers_present": false,
+    "compatible_empty_response": {"turns": []}
+  },
+  "otlp_resource": {
+    "service.name": "codex-app-server",
+    "service.version": "0.167.0-alpha.3.2",
+    "telemetry.sdk.language": "rust",
+    "telemetry.sdk.name": "opentelemetry",
+    "telemetry.sdk.version": "0.31.0"
+  },
+  "otlp_scopes": [
+    "codex_otel.log_only",
+    "codex-app-server",
+    "codex"
+  ],
+  "representative_metrics": [
+    "codex.api_request",
+    "codex.api_request.duration_ms",
+    "codex.websocket.request",
+    "codex.websocket.request.duration_ms",
+    "codex.websocket.continuation",
+    "codex.turn.token_usage",
+    "codex.turn.e2e_duration_ms"
+  ],
+  "limits": [
+    "loopback provider and synthetic credentials; no OpenAI credential or prompt sent",
+    "sanitized protocol relationships only; raw telemetry payloads and identifiers are not retained",
+    "gateway must preserve real trace context and must not synthesize official telemetry"
+  ]
+}

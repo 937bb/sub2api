@@ -233,6 +233,29 @@ Docker build stages copy the replacement module before downloading dependencies.
 
 No production traffic, deployment or commit was performed for this validation.
 
+## Desktop telemetry and turn-cost capture (2026-11-16)
+
+The bundled Desktop app-server was run with loopback inference and local OTLP
+JSON exporters. HTTP inference carried a real `traceparent` and an explicitly
+empty `tracestate` header. The WebSocket upgrade carried no W3C trace headers;
+its `response.create.client_metadata` carried
+`ws_request_header_traceparent` and omitted empty tracestate. In both transports
+the inference trace ID matched the locally exported trace.
+
+The exported resource identified `codex-app-server` version
+`0.167.0-alpha.3.2` using Rust OpenTelemetry 0.31.0. Representative native
+metrics included `codex.api_request`, `codex.websocket.request`,
+`codex.websocket.continuation`, `codex.turn.token_usage`, and end-to-end/request
+duration measures. These remain client-owned telemetry; the gateway preserves
+real trace context but does not synthesize or relay official OTLP events.
+
+API-key provider mode additionally sent authenticated
+`POST /v1/analytics/codex/turn-costs` with a `turn_ids` body and no session,
+originator, account, or trace headers. The gateway now returns the compatible
+local empty envelope `{"turns":[]}` after API-key authentication and before
+model allowlisting. It does not schedule an OAuth account, acquire concurrency,
+write usage, or bill this auxiliary request.
+
 ## Production baseline integration
 
 The production branch deliberately removed the old harvest/ticket subsystem.

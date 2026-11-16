@@ -185,6 +185,16 @@ native WS and WS v2 now recover the original session from the body, preserve it
 separately across account failover and WS-to-HTTP fallback, and derive a distinct
 account-scoped namespace without hashing an already rewritten body twice.
 
+An OTLP-enabled repeat capture confirmed the trace relationship rather than
+only the static exporter capability. HTTP inference preserves the real
+`traceparent` and an explicitly empty `tracestate` header; WS carries no trace
+headers on the upgrade and puts the real traceparent in
+`client_metadata.ws_request_header_traceparent`, omitting empty tracestate. The
+same trace ID appeared in the local OTLP export. Desktop API-key provider mode
+also calls `POST /v1/analytics/codex/turn-costs` with only `turn_ids`; sub2api now
+serves an authenticated local `{"turns":[]}` response so the client does not
+receive a 404 or associate a client turn with an unrelated OAuth account.
+
 ## November 15 transport closure
 
 Fresh ClientHello captures from the bundled 0.167 native engine now back all
