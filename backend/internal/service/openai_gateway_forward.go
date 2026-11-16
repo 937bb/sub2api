@@ -163,6 +163,20 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		setOpenAIResponsesClientToolMapping(c, mapping)
 	}
 
+	// Some relays and older OpenAI-compatible clients do not carry a stable
+	// session_id/prompt_cache_key. Give OAuth Responses requests a tenant-scoped
+	// content-prefix identity so growing conversations keep upstream cache
+	// affinity and SmartWS can retain the same reusable connection key.
+	if account.IsOpenAIOAuthLike() {
+		cachedBody, _, cacheIdentityChanged, cacheIdentityErr := ensureOpenAIOAuthPromptCacheKey(c, account, body)
+		if cacheIdentityErr != nil {
+			return nil, cacheIdentityErr
+		}
+		if cacheIdentityChanged {
+			body = cachedBody
+		}
+	}
+
 	originalBody := body
 	rememberOpenCodeInboundBody(c, originalBody)
 	requestView := newOpenAIRequestView(body)
