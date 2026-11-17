@@ -40,6 +40,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if account.Platform == PlatformKiro {
 		return s.forwardKiroCompatible(ctx, c, account, body, "messages")
 	}
+	zeroInjection := openAIGroupZeroInjection(ctx, account)
 	// 工具 Schema 清洗必须先于所有分流：下游每条路径（原生 Anthropic 直通、
 	// Chat Completions 转换、Responses 转换）都会把 tools 原样带给上游，而
 	// xAI / Moonshot 等严格校验方会因 input_schema 里的 required:null 或
@@ -184,7 +185,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		responsesReq.PreviousResponseID = previousResponseID
 		trimAnthropicCompatResponsesInputToLatestTurn(responsesReq)
 	}
-	if compatReplayGuardEnabled && !account.UsesOpenAICodexProtocol() {
+	if !zeroInjection && compatReplayGuardEnabled && !account.UsesOpenAICodexProtocol() {
 		appendOpenAICompatClaudeCodeTodoGuard(responsesReq)
 	}
 
@@ -231,8 +232,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
 		}
 		codexResult := applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
-			SkipDefaultInstructions: true,
-			PreserveToolCallIDs:     true,
+			SkipDefaultInstructions:  true,
+			DisableProxyInstructions: zeroInjection,
+			PreserveToolCallIDs:      true,
 		})
 		if codexResult.Error != nil {
 			writeAnthropicError(c, http.StatusBadRequest, "invalid_request_error", codexResult.Error.Error())
@@ -251,17 +253,19 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if strings.TrimSpace(existingInstructions) == "" {
 			existingInstructions = extractPromptLikeInstructionsFromInput(reqBody)
 		}
-		if _, err := applyForcedCodexInstructionsTemplate(reqBody, forcedTemplateText, forcedCodexInstructionsTemplateData{
-			ExistingInstructions: strings.TrimSpace(existingInstructions),
-			OriginalModel:        originalModel,
-			NormalizedModel:      normalizedModel,
-			BillingModel:         billingModel,
-			UpstreamModel:        templateUpstreamModel,
-		}); err != nil {
-			return nil, err
+		if !zeroInjection {
+			if _, applyErr := applyForcedCodexInstructionsTemplate(reqBody, forcedTemplateText, forcedCodexInstructionsTemplateData{
+				ExistingInstructions: strings.TrimSpace(existingInstructions),
+				OriginalModel:        originalModel,
+				NormalizedModel:      normalizedModel,
+				BillingModel:         billingModel,
+				UpstreamModel:        templateUpstreamModel,
+			}); applyErr != nil {
+				return nil, applyErr
+			}
 		}
 		ensureCodexOAuthInstructionsField(reqBody)
-		if shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
+		if !zeroInjection && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 			appendOpenAICompatClaudeCodeTodoGuardToRequestBody(reqBody)
 		}
 		if codexResult.NormalizedModel != "" {

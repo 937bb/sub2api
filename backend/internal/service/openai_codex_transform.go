@@ -93,6 +93,7 @@ type codexOAuthTransformOptions struct {
 	IsCodexCLI                          bool
 	IsCompact                           bool
 	SkipDefaultInstructions             bool
+	DisableProxyInstructions            bool
 	PreserveToolCallIDs                 bool
 	OmitPromotedSystemMessagesFromInput bool
 	// ResponsesLite selects where an injected hosted tool is declared.
@@ -305,10 +306,10 @@ func applyCodexOAuthTransformWithOptions(reqBody map[string]any, opts codexOAuth
 	}
 
 	// instructions 处理逻辑：根据是否是 Codex CLI 分别调用不同方法
-	if !opts.SkipDefaultInstructions && applyInstructions(reqBody, opts.IsCodexCLI) {
+	if !opts.DisableProxyInstructions && !opts.SkipDefaultInstructions && applyInstructions(reqBody, opts.IsCodexCLI) {
 		result.Modified = true
 	}
-	if isCodexSparkModel(normalizedModel) && applyCodexSparkImageUnsupportedInstructions(reqBody) {
+	if !opts.DisableProxyInstructions && isCodexSparkModel(normalizedModel) && applyCodexSparkImageUnsupportedInstructions(reqBody) {
 		result.Modified = true
 	}
 	// gpt-5.3-codex-spark rejects the image_generation tool upstream (HTTP 400,

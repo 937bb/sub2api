@@ -174,6 +174,8 @@ type AdminGroup struct {
 	KiroResponseCache domain.KiroResponseCachePolicy `json:"kiro_response_cache"`
 	// ForceOpenAIFast 是管理端请求策略，用户侧分组 DTO 无需暴露。
 	ForceOpenAIFast bool `json:"force_openai_fast"`
+	// OpenAIZeroInjection 是管理端出站提示策略，用户侧分组 DTO 无需暴露。
+	OpenAIZeroInjection bool `json:"openai_zero_injection"`
 	// FreeOpenAIFast 是管理端计费策略，用户侧分组 DTO 无需暴露。
 	FreeOpenAIFast bool `json:"free_openai_fast"`
 

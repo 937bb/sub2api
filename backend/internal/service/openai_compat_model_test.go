@@ -18,6 +18,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -1613,6 +1614,71 @@ func TestForwardAsAnthropic_ForcedCodexInstructionsTemplatePrependsRenderedInstr
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "server-prefix\n\nclient-system", gjson.GetBytes(upstream.lastBody, "instructions").String())
+}
+
+func TestForwardAsAnthropic_ZeroInjectionPreservesClientSystemWithoutForcedTemplate(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.4","max_tokens":16,"system":"client-system","messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: openAICompatSSEResponseWithoutUsage("resp_zero_injection", "gpt-5.4")}
+	svc := &OpenAIGatewayService{
+		cfg: &config.Config{Gateway: config.GatewayConfig{
+			ForcedCodexInstructionsTemplate: "server-prefix\n\n{{ .ExistingInstructions }}",
+		}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID: 1, Name: "openai-oauth", Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+	}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{
+		ID: 7, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, OpenAIZeroInjection: true,
+	})
+
+	result, err := svc.ForwardAsAnthropic(ctx, c, account, body, "", "gpt-5.1")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "", gjson.GetBytes(upstream.lastBody, "instructions").String())
+	require.Contains(t, string(upstream.lastBody), "client-system")
+	require.NotContains(t, string(upstream.lastBody), "server-prefix")
+	require.NotContains(t, string(upstream.lastBody), openAICompatClaudeCodeTodoGuardMarker)
+}
+
+func TestForwardAsAnthropic_APIKeyZeroInjectionSkipsCompatTodoGuard(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"claude-sonnet-4-5","max_tokens":16,"system":"client-system","messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: openAICompatSSECompletedResponse("resp_zero_injection_apikey", "gpt-5.5")}
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID: 2, Name: "openai-apikey", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test", "base_url": "https://api.openai.com/v1"},
+		Extra:       map[string]any{"openai_responses_supported": true},
+	}
+	ctx := context.WithValue(context.Background(), ctxkey.Group, &Group{
+		ID: 8, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true, OpenAIZeroInjection: true,
+	})
+
+	result, err := svc.ForwardAsAnthropic(ctx, c, account, body, "", "gpt-5.5")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Contains(t, string(upstream.lastBody), "client-system")
+	require.NotContains(t, string(upstream.lastBody), openAICompatClaudeCodeTodoGuardMarker)
 }
 
 func TestForwardAsAnthropic_ForcedCodexInstructionsTemplateUsesCachedTemplateContent(t *testing.T) {

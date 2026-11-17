@@ -1298,6 +1298,11 @@ export default {
         free: 'Free Fast',
         freeHint: 'Fast requests in this group still use the priority tier, but customers are charged the equivalent Standard price.'
       },
+      openaiZeroInjection: {
+        title: 'OpenAI prompt policy',
+        enable: 'Zero injection (preserve Codex App prompts)',
+        hint: 'Disables Sub2API-generated default, image bridge, Spark limitation, and forced template prompts. Codex Desktop and other client-provided system, developer, and instructions content is preserved. Existing WebSocket sessions must reconnect.'
+      },
       invalidRequestFallback: {
         title: 'Invalid Request Fallback Group',
         hint: 'Triggered only when upstream explicitly returns prompt too long. Leave empty to disable fallback.',

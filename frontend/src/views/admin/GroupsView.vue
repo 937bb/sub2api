@@ -1621,6 +1621,29 @@
           </p>
         </div>
 
+        <!-- OpenAI 提示词注入策略 -->
+        <div
+          v-if="supportsGroupOpenAIFast(createForm.platform)"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
+        >
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            {{ t("admin.groups.openaiZeroInjection.title") }}
+          </h4>
+          <div class="flex items-center justify-between gap-4 console-switch-row">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.openaiZeroInjection.enable") }}
+            </label>
+            <Toggle
+              data-testid="create-openai-zero-injection"
+              :aria-label="t('admin.groups.openaiZeroInjection.enable')"
+              v-model="createForm.openai_zero_injection"
+            />
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiZeroInjection.hint") }}
+          </p>
+        </div>
+
         <!-- Codex Live 开关（OpenAI 与 Composite 平台） -->
         <div
           v-if="supportsLivePlatform(createForm.platform)"
@@ -3269,6 +3292,29 @@
           </div>
           <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
             {{ t("admin.groups.openaiFast.freeHint") }}
+          </p>
+        </div>
+
+        <!-- OpenAI 提示词注入策略 -->
+        <div
+          v-if="supportsGroupOpenAIFast(editForm.platform)"
+          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4 console-form-block"
+        >
+          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+            {{ t("admin.groups.openaiZeroInjection.title") }}
+          </h4>
+          <div class="flex items-center justify-between gap-4 console-switch-row">
+            <label class="text-sm text-gray-600 dark:text-gray-400">
+              {{ t("admin.groups.openaiZeroInjection.enable") }}
+            </label>
+            <Toggle
+              data-testid="edit-openai-zero-injection"
+              :aria-label="t('admin.groups.openaiZeroInjection.enable')"
+              v-model="editForm.openai_zero_injection"
+            />
+          </div>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            {{ t("admin.groups.openaiZeroInjection.hint") }}
           </p>
         </div>
 
@@ -4957,6 +5003,7 @@ const createForm = reactive({
   monthly_limit_usd: null as number | null,
   long_context_pricing_enabled: true,
   force_openai_fast: false,
+  openai_zero_injection: false,
   free_openai_fast: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
@@ -5325,6 +5372,7 @@ const editForm = reactive({
   monthly_limit_usd: null as number | null,
   long_context_pricing_enabled: true,
   force_openai_fast: false,
+  openai_zero_injection: false,
   free_openai_fast: false,
   model_pricing: [] as PricingFormEntry[],
   // 图片生成计费配置
@@ -5818,6 +5866,7 @@ const closeCreateModal = () => {
   createForm.video_model_prices = createVideoModelPricesForm();
   createForm.long_context_pricing_enabled = true;
   createForm.force_openai_fast = false;
+  createForm.openai_zero_injection = false;
   createForm.free_openai_fast = false;
   createForm.model_pricing = [];
   createForm.web_search_price_per_call = null;
@@ -5944,6 +5993,10 @@ const handleCreateGroup = async () => {
       force_openai_fast: normalizeGroupOpenAIFast(
         createForm.platform,
         createForm.force_openai_fast,
+      ),
+      openai_zero_injection: normalizeGroupOpenAIFast(
+        createForm.platform,
+        createForm.openai_zero_injection,
       ),
       free_openai_fast: normalizeGroupOpenAIFast(
         createForm.platform,
@@ -6095,6 +6148,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.long_context_pricing_enabled =
     group.long_context_pricing_enabled ?? true;
   editForm.force_openai_fast = group.force_openai_fast ?? false;
+  editForm.openai_zero_injection = group.openai_zero_injection ?? false;
   editForm.free_openai_fast = group.free_openai_fast ?? false;
   editForm.model_pricing = groupPricingFromAPI(group.model_pricing);
   editForm.allow_image_generation = group.allow_image_generation ?? false;
@@ -6232,6 +6286,7 @@ const closeEditModal = () => {
   editForm.video_model_prices = createVideoModelPricesForm();
   editForm.long_context_pricing_enabled = true;
   editForm.force_openai_fast = false;
+  editForm.openai_zero_injection = false;
   editForm.free_openai_fast = false;
   editForm.model_pricing = [];
   editForm.web_search_price_per_call = null;
@@ -6291,6 +6346,10 @@ const handleUpdateGroup = async () => {
       force_openai_fast: normalizeGroupOpenAIFast(
         editForm.platform,
         editForm.force_openai_fast,
+      ),
+      openai_zero_injection: normalizeGroupOpenAIFast(
+        editForm.platform,
+        editForm.openai_zero_injection,
       ),
       free_openai_fast: normalizeGroupOpenAIFast(
         editForm.platform,

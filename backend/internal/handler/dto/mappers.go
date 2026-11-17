@@ -150,6 +150,7 @@ func GroupFromServiceAdmin(g *service.Group) *AdminGroup {
 		KiroResponseCache:           g.KiroResponseCache,
 		Group:                       groupFromServiceBase(g),
 		ForceOpenAIFast:             g.ForceOpenAIFast,
+		OpenAIZeroInjection:         g.OpenAIZeroInjection,
 		FreeOpenAIFast:              g.FreeOpenAIFast,
 		ProfitControlEnabled:        g.ProfitControlEnabled,
 		ProfitMinMargin:             g.ProfitMinMargin,

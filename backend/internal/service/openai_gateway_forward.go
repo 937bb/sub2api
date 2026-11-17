@@ -383,6 +383,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	apiKey := getAPIKeyFromContext(c)
+	zeroInjection := openAIGroupZeroInjection(ctx, account)
 	imageGenerationAllowed := GroupAllowsImageGeneration(nil)
 	if apiKey != nil {
 		imageGenerationAllowed = GroupAllowsImageGeneration(apiKey.Group)
@@ -423,7 +424,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 	instructions := gjson.GetBytes(body, "instructions")
 	instructionsEmpty := !instructions.Exists() || instructions.Type != gjson.String || strings.TrimSpace(instructions.String()) == ""
-	if instructionsEmpty && account.UsesOpenAICodexProtocol() && !compatMessagesBridge && !nativeCNResponses {
+	if !zeroInjection && instructionsEmpty && account.UsesOpenAICodexProtocol() && !compatMessagesBridge && !nativeCNResponses {
 		markPatchSet("instructions", defaultCodexSynthInstructions(upstreamModel))
 	}
 	if billingModel != requestedModel {
@@ -498,7 +499,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			imageIntent = true
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] /responses image_generation request inbound_model=%s mapped_model=%s account_type=%s", requestView.Model, upstreamModel, account.Type)
 		}
-		if codexImageGenerationBridgeEnabled && applyCodexImageGenerationBridgeInstructions(decoded) {
+		if !zeroInjection && codexImageGenerationBridgeEnabled && applyCodexImageGenerationBridgeInstructions(decoded) {
 			markDecodedModified()
 			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Added Codex image_generation bridge instructions")
 		}
@@ -549,6 +550,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 				IsCodexCLI:                          isCodexCLI,
 				IsCompact:                           isCompactRequest,
 				SkipDefaultInstructions:             true,
+				DisableProxyInstructions:            zeroInjection,
 				PreserveToolCallIDs:                 true,
 				OmitPromotedSystemMessagesFromInput: omitPromotedSystemMessages,
 				ResponsesLite:                       responsesLite,
@@ -559,6 +561,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			codexResult = applyCodexOAuthTransformWithOptions(decoded, codexOAuthTransformOptions{
 				IsCodexCLI:                          isCodexCLI,
 				IsCompact:                           isCompactRequest,
+				DisableProxyInstructions:            zeroInjection,
 				OmitPromotedSystemMessagesFromInput: omitPromotedSystemMessages,
 				ResponsesLite:                       responsesLite,
 			})

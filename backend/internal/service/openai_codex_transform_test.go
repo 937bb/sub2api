@@ -1580,6 +1580,57 @@ func TestApplyCodexOAuthTransform_GPT6AstraSuppliesModelSpecificInstructions(t *
 	require.True(t, result.Modified)
 }
 
+func TestApplyCodexOAuthTransform_ZeroInjectionSkipsProxyPrompts(t *testing.T) {
+	reqBody := map[string]any{
+		"model": "gpt-5.3-codex-spark",
+		"input": []any{
+			map[string]any{"type": "message", "role": "system", "content": "client system"},
+			map[string]any{"type": "message", "role": "user", "content": "hello"},
+		},
+	}
+
+	result := applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
+		IsCodexCLI:               true,
+		DisableProxyInstructions: true,
+	})
+
+	require.NoError(t, result.Error)
+	instructions, ok := reqBody["instructions"].(string)
+	require.True(t, ok)
+	require.Equal(t, "client system", instructions)
+	require.NotContains(t, instructions, codexSparkImageUnsupportedMarker)
+	require.NotContains(t, instructions, "You are Codex")
+}
+
+func TestApplyCodexOAuthTransform_ZeroInjectionPreservesClientInstructions(t *testing.T) {
+	reqBody := map[string]any{
+		"model":        "gpt-6.1-sol",
+		"instructions": "desktop supplied instructions",
+		"input":        "hello",
+	}
+
+	result := applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
+		IsCodexCLI:               true,
+		DisableProxyInstructions: true,
+	})
+
+	require.NoError(t, result.Error)
+	require.Equal(t, "desktop supplied instructions", reqBody["instructions"])
+}
+
+func TestApplyCodexOAuthTransform_ZeroInjectionLeavesMissingInstructionsUnset(t *testing.T) {
+	reqBody := map[string]any{"model": "gpt-6.1-sol", "input": "hello"}
+
+	result := applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
+		IsCodexCLI:               true,
+		DisableProxyInstructions: true,
+	})
+
+	require.NoError(t, result.Error)
+	_, exists := reqBody["instructions"]
+	require.False(t, exists)
+}
+
 func TestApplyCodexOAuthTransform_NonCodexCLI_PreservesExistingInstructions(t *testing.T) {
 	// 非 Codex CLI 场景：已有 instructions 时保留客户端的值，不再覆盖
 

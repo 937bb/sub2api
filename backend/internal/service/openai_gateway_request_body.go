@@ -2196,6 +2196,14 @@ func openAIGroupForcesFast(ctx context.Context, account *Account) bool {
 	return IsGroupContextValid(group) && groupSupportsOpenAIFast(group.Platform) && group.ForceOpenAIFast
 }
 
+func openAIGroupZeroInjection(ctx context.Context, account *Account) bool {
+	if ctx == nil || account == nil || account.Platform != PlatformOpenAI {
+		return false
+	}
+	group, _ := ctx.Value(ctxkey.Group).(*Group)
+	return IsGroupContextValid(group) && groupSupportsOpenAIFast(group.Platform) && group.OpenAIZeroInjection
+}
+
 // applyOpenAIFastPolicyToBody applies the OpenAI fast policy to a raw request
 // body. When action=filter it removes the service_tier field; when
 // action=block it returns (body, *OpenAIFastBlockedError). On pass it

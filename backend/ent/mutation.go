@@ -22161,6 +22161,7 @@ type GroupMutation struct {
 	allow_messages_dispatch                 *bool
 	allow_live                              *bool
 	force_openai_fast                       *bool
+	openai_zero_injection                   *bool
 	free_openai_fast                        *bool
 	require_oauth_only                      *bool
 	require_privacy_set                     *bool
@@ -25059,6 +25060,42 @@ func (m *GroupMutation) ResetForceOpenaiFast() {
 	m.force_openai_fast = nil
 }
 
+// SetOpenaiZeroInjection sets the "openai_zero_injection" field.
+func (m *GroupMutation) SetOpenaiZeroInjection(b bool) {
+	m.openai_zero_injection = &b
+}
+
+// OpenaiZeroInjection returns the value of the "openai_zero_injection" field in the mutation.
+func (m *GroupMutation) OpenaiZeroInjection() (r bool, exists bool) {
+	v := m.openai_zero_injection
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOpenaiZeroInjection returns the old "openai_zero_injection" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldOpenaiZeroInjection(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOpenaiZeroInjection is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOpenaiZeroInjection requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOpenaiZeroInjection: %w", err)
+	}
+	return oldValue.OpenaiZeroInjection, nil
+}
+
+// ResetOpenaiZeroInjection resets all changes to the "openai_zero_injection" field.
+func (m *GroupMutation) ResetOpenaiZeroInjection() {
+	m.openai_zero_injection = nil
+}
+
 // SetFreeOpenaiFast sets the "free_openai_fast" field.
 func (m *GroupMutation) SetFreeOpenaiFast(b bool) {
 	m.free_openai_fast = &b
@@ -26032,7 +26069,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 69)
+	fields := make([]string, 0, 70)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26195,6 +26232,9 @@ func (m *GroupMutation) Fields() []string {
 	if m.force_openai_fast != nil {
 		fields = append(fields, group.FieldForceOpenaiFast)
 	}
+	if m.openai_zero_injection != nil {
+		fields = append(fields, group.FieldOpenaiZeroInjection)
+	}
 	if m.free_openai_fast != nil {
 		fields = append(fields, group.FieldFreeOpenaiFast)
 	}
@@ -26356,6 +26396,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.AllowLive()
 	case group.FieldForceOpenaiFast:
 		return m.ForceOpenaiFast()
+	case group.FieldOpenaiZeroInjection:
+		return m.OpenaiZeroInjection()
 	case group.FieldFreeOpenaiFast:
 		return m.FreeOpenaiFast()
 	case group.FieldRequireOauthOnly:
@@ -26503,6 +26545,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldAllowLive(ctx)
 	case group.FieldForceOpenaiFast:
 		return m.OldForceOpenaiFast(ctx)
+	case group.FieldOpenaiZeroInjection:
+		return m.OldOpenaiZeroInjection(ctx)
 	case group.FieldFreeOpenaiFast:
 		return m.OldFreeOpenaiFast(ctx)
 	case group.FieldRequireOauthOnly:
@@ -26919,6 +26963,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetForceOpenaiFast(v)
+		return nil
+	case group.FieldOpenaiZeroInjection:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOpenaiZeroInjection(v)
 		return nil
 	case group.FieldFreeOpenaiFast:
 		v, ok := value.(bool)
@@ -27697,6 +27748,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldForceOpenaiFast:
 		m.ResetForceOpenaiFast()
+		return nil
+	case group.FieldOpenaiZeroInjection:
+		m.ResetOpenaiZeroInjection()
 		return nil
 	case group.FieldFreeOpenaiFast:
 		m.ResetFreeOpenaiFast()

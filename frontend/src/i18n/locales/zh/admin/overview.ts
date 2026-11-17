@@ -1296,6 +1296,11 @@ export default {
         free: '免费 Fast',
         freeHint: '该分组的 Fast 请求仍使用 priority 档位，但客户实际费用按同一请求的 Standard 价格计算。'
       },
+      openaiZeroInjection: {
+        title: 'OpenAI 提示策略',
+        enable: '0 注入（保留 Codex App 原始提示词）',
+        hint: '不追加 Sub2API 生成的默认、图片桥接、Spark 限制或强制模板提示。Codex Desktop 和其他客户端提交的 system、developer、instructions 会保留；已有 WebSocket 会话需重连。'
+      },
       invalidRequestFallback: {
         title: '无效请求兜底分组',
         hint: '仅当上游明确返回 prompt too long 时才会触发，留空表示不兜底',
