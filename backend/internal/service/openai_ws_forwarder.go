@@ -281,7 +281,11 @@ func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {
 	}
 	s.openaiWSPoolOnce.Do(func() {
 		if s.openaiWSPool == nil {
-			s.openaiWSPool = newOpenAIWSConnPool(s.cfg)
+			var dialSlot OpenAIWSDialSlotLimiter
+			if limiter, ok := s.cache.(OpenAIWSDialSlotLimiter); ok {
+				dialSlot = limiter
+			}
+			s.openaiWSPool = newOpenAIWSConnPool(s.cfg, dialSlot)
 		}
 	})
 	return s.openaiWSPool

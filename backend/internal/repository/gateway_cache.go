@@ -16,6 +16,7 @@ import (
 
 const stickySessionPrefix = "sticky_session:"
 const openAIResponsesSessionWindowPrefix = "openai_responses_session_window:"
+const openAIWSDialSlotPrefix = "openai_ws_dial_slot:"
 const liveCallPrefix = "live:call:"
 
 type gatewayCache struct {
@@ -69,6 +70,43 @@ func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64
 	key := buildSessionKey(groupID, sessionHash)
 	return c.rdb.Del(ctx, key).Err()
 }
+
+var reserveOpenAIWSDialSlotScript = redis.NewScript(`
+local now_parts = redis.call('TIME')
+local now_ms = tonumber(now_parts[1]) * 1000 + math.floor(tonumber(now_parts[2]) / 1000)
+local next_ms = tonumber(redis.call('GET', KEYS[1]))
+if next_ms == nil or next_ms < now_ms then
+  next_ms = now_ms
+end
+local slot_ms = next_ms
+local following_ms = slot_ms + tonumber(ARGV[1])
+redis.call('SET', KEYS[1], following_ms, 'PXAT', following_ms + tonumber(ARGV[1]))
+return slot_ms - now_ms
+`)
+
+func (c *gatewayCache) ReserveOpenAIWSDialSlot(ctx context.Context, accountID int64, interval time.Duration) (time.Duration, error) {
+	if c == nil || c.rdb == nil {
+		return 0, errors.New("gateway cache unavailable")
+	}
+	if accountID <= 0 || interval <= 0 {
+		return 0, errors.New("invalid OpenAI WS dial slot reservation")
+	}
+	waitMS, err := reserveOpenAIWSDialSlotScript.Run(
+		ctx,
+		c.rdb,
+		[]string{openAIWSDialSlotPrefix + strconv.FormatInt(accountID, 10)},
+		interval.Milliseconds(),
+	).Int64()
+	if err != nil {
+		return 0, err
+	}
+	if waitMS <= 0 {
+		return 0, nil
+	}
+	return time.Duration(waitMS) * time.Millisecond, nil
+}
+
+var _ service.OpenAIWSDialSlotLimiter = (*gatewayCache)(nil)
 
 var claimOpenAIResponsesSessionWindowScript = redis.NewScript(`
 local previous = redis.call('GET', KEYS[1])

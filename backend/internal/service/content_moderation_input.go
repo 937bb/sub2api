@@ -327,13 +327,71 @@ func (collector moderationTextCollector) isResponsesUserTextItem(item gjson.Resu
 }
 
 func (collector moderationTextCollector) responseItemHasModerationText(item gjson.Result) bool {
-	var parts []string
-	var images []string
-	collector.collectContentValue(item.Get("content"), &parts, &images)
-	if item.Get("type").String() == "input_text" || item.Get("text").Exists() {
-		collector.collectContentValue(item, &parts, &images)
+	if contentValueHasModerationMaterial(item.Get("content")) {
+		return true
 	}
-	return normalizeContentModerationText(strings.Join(parts, "\n")) != "" || len(images) > 0
+	if item.Get("type").String() == "input_text" || item.Get("text").Exists() {
+		return contentValueHasModerationMaterial(item)
+	}
+	return false
+}
+
+// contentValueHasModerationMaterial mirrors collectContentValue's accepted
+// shapes without allocating text/image slices. It is used only to find the
+// latest Responses boundary; the selected items are still fully collected by
+// collectContentValue afterwards.
+func contentValueHasModerationMaterial(value gjson.Result) bool {
+	switch {
+	case !value.Exists():
+		return false
+	case value.Type == gjson.String:
+		return strings.TrimSpace(value.String()) != ""
+	case value.IsArray():
+		found := false
+		value.ForEach(func(_, item gjson.Result) bool {
+			found = contentValueHasModerationMaterial(item)
+			return !found
+		})
+		return found
+	case value.IsObject():
+		for _, path := range []string{
+			"image_url.url", "image_url", "url", "source.data", "data", "base64",
+		} {
+			if isModerationImageReference(value.Get(path).String()) {
+				return true
+			}
+		}
+		for _, pair := range [][2]string{
+			{"source.media_type", "source.data"},
+			{"source.mediaType", "source.data"},
+			{"media_type", "data"},
+			{"mime_type", "data"},
+			{"mimeType", "data"},
+		} {
+			if strings.TrimSpace(value.Get(pair[0]).String()) != "" && strings.TrimSpace(value.Get(pair[1]).String()) != "" {
+				return true
+			}
+		}
+
+		switch strings.ToLower(strings.TrimSpace(value.Get("type").String())) {
+		case "", "text", "input_text", "message":
+			if strings.TrimSpace(value.Get("text").String()) != "" {
+				return true
+			}
+			return contentValueHasModerationMaterial(value.Get("content"))
+		case "image_url", "input_image", "image":
+			return false
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
+func isModerationImageReference(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "data:") || strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://")
 }
 
 func (collector moderationTextCollector) collectLastGeminiContent(contents gjson.Result, parts *[]string, images *[]string) {

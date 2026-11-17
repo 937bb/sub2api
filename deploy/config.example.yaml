@@ -412,6 +412,9 @@ gateway:
     oauth_max_conns_factor: 5.0
     apikey_max_conns_factor: 5.0
     dial_timeout_seconds: 10
+    # 同一账号上游 WS 握手最小间隔（毫秒）。默认每秒最多新建 1 条，避免扩容/预热握手突发触发 403。
+    # 仅限制新建连接，不限制已有连接复用和正常请求吞吐；0 表示关闭。
+    dial_min_interval_ms: 1000
     read_timeout_seconds: 900
     write_timeout_seconds: 120
     pool_target_utilization: 0.7

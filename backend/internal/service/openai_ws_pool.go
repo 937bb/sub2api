@@ -816,6 +816,14 @@ type openAIWSAccountPool struct {
 	prewarmUntil  time.Time
 	prewarmFails  int
 	prewarmFailAt time.Time
+	nextDialAt    time.Time
+}
+
+// OpenAIWSDialSlotLimiter coordinates upstream WS handshakes across gateway
+// processes. Implementations should reserve one account-scoped slot and return
+// how long the caller must wait before dialing.
+type OpenAIWSDialSlotLimiter interface {
+	ReserveOpenAIWSDialSlot(ctx context.Context, accountID int64, interval time.Duration) (time.Duration, error)
 }
 
 func (ap *openAIWSAccountPool) changeChannelLocked() chan struct{} {
@@ -866,6 +874,7 @@ type openAIWSConnPool struct {
 
 	accounts sync.Map // key: int64(accountID), value: *openAIWSAccountPool
 	seq      atomic.Uint64
+	dialSlot OpenAIWSDialSlotLimiter
 
 	metrics openAIWSPoolMetrics
 
@@ -874,11 +883,14 @@ type openAIWSConnPool struct {
 	closeOnce    sync.Once
 }
 
-func newOpenAIWSConnPool(cfg *config.Config) *openAIWSConnPool {
+func newOpenAIWSConnPool(cfg *config.Config, dialSlots ...OpenAIWSDialSlotLimiter) *openAIWSConnPool {
 	pool := &openAIWSConnPool{
 		cfg:          cfg,
 		clientDialer: newDefaultOpenAIWSClientDialer(),
 		workerStopCh: make(chan struct{}),
+	}
+	if len(dialSlots) > 0 {
+		pool.dialSlot = dialSlots[0]
 	}
 	pool.startBackgroundWorkers()
 	return pool
@@ -2149,6 +2161,12 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	if p == nil || p.clientDialer == nil {
 		return nil, errors.New("openai ws client dialer is nil")
 	}
+	if req.Account == nil || req.Account.ID <= 0 {
+		return nil, errors.New("openai ws dial account is invalid")
+	}
+	if err := p.waitForAccountDialSlot(ctx, req.Account.ID); err != nil {
+		return nil, err
+	}
 	headers := cloneHeader(req.Headers)
 	var err error
 	if req.HeadersFactory != nil {
@@ -2197,6 +2215,52 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	}
 	pooledConn.routingAffinity = normalizeOpenAIWSRoutingAffinity(req.Headers)
 	return pooledConn, nil
+}
+
+// waitForAccountDialSlot serializes new upstream handshakes per account. The
+// reservation is made before sleeping so concurrent demand and prewarm dials
+// share one schedule instead of waking together and creating a burst.
+func (p *openAIWSConnPool) waitForAccountDialSlot(ctx context.Context, accountID int64) error {
+	interval := p.dialMinInterval()
+	if interval <= 0 || accountID <= 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if p.dialSlot != nil {
+		wait, err := p.dialSlot.ReserveOpenAIWSDialSlot(ctx, accountID, interval)
+		if err == nil {
+			return waitOpenAIWSDialSlot(ctx, wait)
+		}
+		logOpenAIWSModeWarn("dial_slot_distributed_fallback account_id=%d cause=%s", accountID, truncateOpenAIWSLogValue(err.Error(), openAIWSLogValueMaxLen))
+	}
+
+	ap := p.getOrCreateAccountPool(accountID)
+	ap.mu.Lock()
+	now := time.Now()
+	slot := now
+	if ap.nextDialAt.After(slot) {
+		slot = ap.nextDialAt
+	}
+	ap.nextDialAt = slot.Add(interval)
+	ap.mu.Unlock()
+
+	return waitOpenAIWSDialSlot(ctx, time.Until(slot))
+}
+
+func waitOpenAIWSDialSlot(ctx context.Context, wait time.Duration) error {
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (p *openAIWSConnPool) nextConnID(accountID int64) string {
@@ -2325,6 +2389,13 @@ func (p *openAIWSConnPool) targetUtilization() float64 {
 func (p *openAIWSConnPool) prewarmCooldown() time.Duration {
 	if p != nil && p.cfg != nil && p.cfg.Gateway.OpenAIWS.PrewarmCooldownMS > 0 {
 		return time.Duration(p.cfg.Gateway.OpenAIWS.PrewarmCooldownMS) * time.Millisecond
+	}
+	return 0
+}
+
+func (p *openAIWSConnPool) dialMinInterval() time.Duration {
+	if p != nil && p.cfg != nil && p.cfg.Gateway.OpenAIWS.DialMinIntervalMS > 0 {
+		return time.Duration(p.cfg.Gateway.OpenAIWS.DialMinIntervalMS) * time.Millisecond
 	}
 	return 0
 }

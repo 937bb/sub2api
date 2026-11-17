@@ -1386,8 +1386,11 @@ type GatewayOpenAIWSConfig struct {
 	// 在飞请求数另由账号并发槽限制；系数 1.0 会让存活会话数一到并发数就返回 1013 busy，默认 5.0。
 	OAuthMaxConnsFactor float64 `mapstructure:"oauth_max_conns_factor"`
 	// APIKeyMaxConnsFactor: API Key 账号连接池系数，含义与 OAuthMaxConnsFactor 相同，默认 5.0。
-	APIKeyMaxConnsFactor  float64 `mapstructure:"apikey_max_conns_factor"`
-	DialTimeoutSeconds    int     `mapstructure:"dial_timeout_seconds"`
+	APIKeyMaxConnsFactor float64 `mapstructure:"apikey_max_conns_factor"`
+	DialTimeoutSeconds   int     `mapstructure:"dial_timeout_seconds"`
+	// DialMinIntervalMS: 同一账号两次上游 WS 握手的最小间隔。
+	// 用于抑制扩容/预热时的握手突发；0 表示关闭。
+	DialMinIntervalMS     int     `mapstructure:"dial_min_interval_ms"`
 	ReadTimeoutSeconds    int     `mapstructure:"read_timeout_seconds"`
 	WriteTimeoutSeconds   int     `mapstructure:"write_timeout_seconds"`
 	PoolTargetUtilization float64 `mapstructure:"pool_target_utilization"`
@@ -2543,6 +2546,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.openai_ws.oauth_max_conns_factor", 5.0)
 	viper.SetDefault("gateway.openai_ws.apikey_max_conns_factor", 5.0)
 	viper.SetDefault("gateway.openai_ws.dial_timeout_seconds", 10)
+	viper.SetDefault("gateway.openai_ws.dial_min_interval_ms", 1000)
 	viper.SetDefault("gateway.openai_ws.read_timeout_seconds", 900)
 	viper.SetDefault("gateway.openai_ws.write_timeout_seconds", 120)
 	viper.SetDefault("gateway.openai_ws.pool_target_utilization", 0.7)
@@ -3600,6 +3604,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.OpenAIWS.DialTimeoutSeconds <= 0 {
 		return fmt.Errorf("gateway.openai_ws.dial_timeout_seconds must be positive")
+	}
+	if c.Gateway.OpenAIWS.DialMinIntervalMS < 0 {
+		return fmt.Errorf("gateway.openai_ws.dial_min_interval_ms must be non-negative")
 	}
 	if c.Gateway.OpenAIWS.ReadTimeoutSeconds <= 0 {
 		return fmt.Errorf("gateway.openai_ws.read_timeout_seconds must be positive")

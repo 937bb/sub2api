@@ -56,6 +56,51 @@ func TestOpenAIWSConnPool_NextConnIDFormat(t *testing.T) {
 	require.Equal(t, "oa_ws_42_2", id2)
 }
 
+func TestOpenAIWSConnPool_DialMinIntervalPerAccount(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.DialMinIntervalMS = 60
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSFakeDialer{})
+	account := &Account{ID: 4201, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	req := openAIWSAcquireRequest{
+		Account: account,
+		WSURL:   "wss://example.com/backend-api/codex/responses",
+	}
+
+	first, err := pool.dialConn(context.Background(), req)
+	require.NoError(t, err)
+	first.close()
+
+	started := time.Now()
+	second, err := pool.dialConn(context.Background(), req)
+	require.NoError(t, err)
+	second.close()
+	require.GreaterOrEqual(t, time.Since(started), 45*time.Millisecond)
+}
+
+func TestOpenAIWSConnPool_DialMinIntervalDoesNotBlockOtherAccounts(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Gateway.OpenAIWS.DialMinIntervalMS = 200
+	pool := newOpenAIWSConnPool(cfg)
+	pool.setClientDialerForTest(&openAIWSFakeDialer{})
+
+	first, err := pool.dialConn(context.Background(), openAIWSAcquireRequest{
+		Account: &Account{ID: 4301, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		WSURL:   "wss://example.com/backend-api/codex/responses",
+	})
+	require.NoError(t, err)
+	first.close()
+
+	started := time.Now()
+	second, err := pool.dialConn(context.Background(), openAIWSAcquireRequest{
+		Account: &Account{ID: 4302, Platform: PlatformOpenAI, Type: AccountTypeOAuth},
+		WSURL:   "wss://example.com/backend-api/codex/responses",
+	})
+	require.NoError(t, err)
+	second.close()
+	require.Less(t, time.Since(started), 100*time.Millisecond)
+}
+
 func TestOpenAIWSConnPool_AcquireCleanupInterval(t *testing.T) {
 	require.Equal(t, 3*time.Second, openAIWSAcquireCleanupInterval)
 	require.Less(t, openAIWSAcquireCleanupInterval, openAIWSBackgroundSweepTicker)

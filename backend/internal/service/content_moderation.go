@@ -1104,7 +1104,11 @@ func (s *ContentModerationService) checkSync(ctx context.Context, input ContentM
 	if trackPreBlock {
 		s.recordPreBlockSyncMetric(latency, action)
 	}
-	slog.Info("content_moderation.audit_result",
+	logAuditResult := slog.Debug
+	if flagged || blocked {
+		logAuditResult = slog.Info
+	}
+	logAuditResult("content_moderation.audit_result",
 		"user_id", input.UserID,
 		"api_key_id", input.APIKeyID,
 		"group_id", contentModerationLogGroupID(input.GroupID),

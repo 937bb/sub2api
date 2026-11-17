@@ -549,6 +549,9 @@ func TestLoadDefaultOpenAIWSConfig(t *testing.T) {
 	if cfg.Gateway.OpenAIWS.PrewarmCooldownMS != 300 {
 		t.Fatalf("Gateway.OpenAIWS.PrewarmCooldownMS = %d, want 300", cfg.Gateway.OpenAIWS.PrewarmCooldownMS)
 	}
+	if cfg.Gateway.OpenAIWS.DialMinIntervalMS != 1000 {
+		t.Fatalf("Gateway.OpenAIWS.DialMinIntervalMS = %d, want 1000", cfg.Gateway.OpenAIWS.DialMinIntervalMS)
+	}
 	if cfg.Gateway.OpenAIWS.ClientReadLimitBytes != 64*1024*1024 {
 		t.Fatalf("Gateway.OpenAIWS.ClientReadLimitBytes = %d, want %d", cfg.Gateway.OpenAIWS.ClientReadLimitBytes, 64*1024*1024)
 	}
@@ -2344,6 +2347,11 @@ func TestValidateConfig_OpenAIWSRules(t *testing.T) {
 			name:    "dial_timeout_seconds 必须为正数",
 			mutate:  func(c *Config) { c.Gateway.OpenAIWS.DialTimeoutSeconds = 0 },
 			wantErr: "gateway.openai_ws.dial_timeout_seconds",
+		},
+		{
+			name:    "dial_min_interval_ms 不能为负数",
+			mutate:  func(c *Config) { c.Gateway.OpenAIWS.DialMinIntervalMS = -1 },
+			wantErr: "gateway.openai_ws.dial_min_interval_ms",
 		},
 		{
 			name:    "read_timeout_seconds 必须为正数",
