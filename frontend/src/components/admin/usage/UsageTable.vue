@@ -451,7 +451,7 @@
             <template v-if="tooltipData && !isImageUsage(tooltipData) && (!tooltipData.billing_mode || tooltipData.billing_mode === BILLING_MODE_TOKEN)">
               <div v-if="tooltipData && textInputTokens(tooltipData) > 0" class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.inputTokenPrice') }}</span>
-                <span class="font-medium text-sky-300">{{ formatTokenPricePerMillion(tooltipData.input_cost, textInputTokens(tooltipData)) }} {{ t('usage.perMillionTokens') }}</span>
+                <span class="font-medium text-sky-300">{{ formatTokenPricePerMillion(userBilledComponentCost(tooltipData.input_cost, tooltipData), textInputTokens(tooltipData)) }} {{ t('usage.perMillionTokens') }}</span>
               </div>
               <div v-if="tooltipData && hasImageInputTokens(tooltipData)" class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.imageInputTokenPrice') }}</span>
@@ -459,11 +459,15 @@
               </div>
               <div v-if="tooltipData && tooltipData.output_cost > 0 && textOutputTokens(tooltipData) > 0" class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.outputTokenPrice') }}</span>
-                <span class="font-medium text-violet-300">{{ formatTokenPricePerMillion(tooltipData.output_cost, textOutputTokens(tooltipData)) }} {{ t('usage.perMillionTokens') }}</span>
+                <span class="font-medium text-violet-300">{{ formatTokenPricePerMillion(userBilledComponentCost(tooltipData.output_cost, tooltipData), textOutputTokens(tooltipData)) }} {{ t('usage.perMillionTokens') }}</span>
               </div>
               <div v-if="tooltipData && hasImageOutputTokens(tooltipData)" class="flex items-center justify-between gap-4">
                 <span class="text-gray-400">{{ t('usage.imageOutputTokenPrice') }}</span>
                 <span class="font-medium text-pink-300">{{ formatTokenPricePerMillion(tooltipData.image_output_cost ?? 0, tooltipData.image_output_tokens) }} {{ t('usage.perMillionTokens') }}</span>
+              </div>
+              <div v-if="tooltipData && tooltipData.cache_read_cost > 0 && tooltipData.cache_read_tokens > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.cacheReadTokenPrice') }}</span>
+                <span class="font-medium text-emerald-300">{{ formatTokenPricePerMillion(userBilledComponentCost(tooltipData.cache_read_cost, tooltipData), tooltipData.cache_read_tokens) }} {{ t('usage.perMillionTokens') }}</span>
               </div>
             </template>
             <template v-else-if="tooltipData && isImageUsage(tooltipData)">
@@ -599,6 +603,13 @@ function accountBilled(row: { total_cost?: number | null; account_stats_cost?: n
   const base = row.account_stats_cost != null ? row.account_stats_cost : (row.total_cost ?? 0)
   const result = base * (row.account_rate_multiplier ?? 1)
   return Number.isNaN(result) ? 0 : result
+}
+
+function userBilledComponentCost(
+  cost: number | null | undefined,
+  row: { rate_multiplier?: number | null }
+): number {
+  return (cost ?? 0) * (row.rate_multiplier ?? 1)
 }
 
 
