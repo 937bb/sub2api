@@ -42,6 +42,7 @@ const messages: Record<string, string> = {
   'admin.usage.cacheReadCost': 'Cache Read Cost',
   'usage.inputTokenPrice': 'Input price',
   'usage.outputTokenPrice': 'Output price',
+  'usage.cacheReadTokenPrice': 'Cache read price',
   'usage.perMillionTokens': '/ 1M tokens',
   'usage.serviceTier': 'Service tier',
   'usage.serviceTierPriority': 'Fast',
@@ -337,6 +338,41 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('$5.0000 / 1M tokens')
     expect(text).toContain('$30.0000 / 1M tokens')
     expect(text).toContain('$0.069568')
+  })
+
+  it('shows effective user token prices after applying the stored group rate', async () => {
+    const row = {
+      request_id: 'req-effective-token-pricing',
+      actual_cost: 0.001004,
+      total_cost: 0.000502,
+      account_rate_multiplier: 1,
+      rate_multiplier: 2,
+      service_tier: 'standard',
+      billing_mode: 'token',
+      input_cost: 0.0001,
+      output_cost: 0.0004,
+      cache_creation_cost: 0,
+      cache_read_cost: 0.000002,
+      input_tokens: 100,
+      output_tokens: 100,
+      cache_creation_tokens: 0,
+      cache_read_tokens: 100,
+    }
+
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], loading: false, columns: [] },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+
+    const triggers = wrapper.findAll('.group.relative')
+    await triggers[triggers.length - 1].trigger('mouseenter')
+    await nextTick()
+
+    const text = wrapper.text()
+    expect(text).toContain('$2.0000 / 1M tokens')
+    expect(text).toContain('$8.0000 / 1M tokens')
+    expect(text).toContain('$0.0400 / 1M tokens')
+    expect(text).toContain('2.00x')
   })
 
   it.each(['token', 'image', 'per_request'])('keeps eight decimal places in %s cost details', async (billingMode) => {
