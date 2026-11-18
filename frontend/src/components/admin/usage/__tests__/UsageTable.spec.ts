@@ -336,13 +336,13 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('$0.069568')
   })
 
-  it('shows effective user token prices after applying the stored group rate', async () => {
+  it('shows original token prices independently from the stored group rate', async () => {
     const row = {
-      request_id: 'req-effective-token-pricing',
-      actual_cost: 0.001004,
+      request_id: 'req-original-token-pricing',
+      actual_cost: 0.0000753,
       total_cost: 0.000502,
       account_rate_multiplier: 1,
-      rate_multiplier: 2,
+      rate_multiplier: 0.15,
       service_tier: 'standard',
       billing_mode: 'token',
       input_cost: 0.0001,
@@ -365,10 +365,13 @@ describe('admin UsageTable tooltip', () => {
     await nextTick()
 
     const text = wrapper.text()
-    expect(text).toContain('$2.0000 / 1M tokens')
-    expect(text).toContain('$8.0000 / 1M tokens')
-    expect(text).toContain('$0.0400 / 1M tokens')
-    expect(text).toContain('2.00x')
+    expect(text).toContain('$1.0000 / 1M tokens')
+    expect(text).toContain('$4.0000 / 1M tokens')
+    expect(text).toContain('$0.0200 / 1M tokens')
+    expect(text).toContain('0.15x')
+    expect(text).not.toContain('$0.1500 / 1M tokens')
+    expect(text).not.toContain('$0.6000 / 1M tokens')
+    expect(text).not.toContain('$0.0030 / 1M tokens')
   })
 
   it.each(['token', 'image', 'per_request'])('keeps eight decimal places in %s cost details', async (billingMode) => {
