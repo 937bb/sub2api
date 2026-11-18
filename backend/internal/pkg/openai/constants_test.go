@@ -10,9 +10,10 @@ func TestDefaultModelsIncludeBareGPT56Alias(t *testing.T) {
 	require.Contains(t, DefaultModelIDs(), "gpt-5.6")
 }
 
-func TestDefaultModelsIncludeGPT6Astra(t *testing.T) {
+func TestDefaultModelsIncludeGPT6AstraAndGPT62Sol(t *testing.T) {
 	require.Contains(t, DefaultModelIDs(), "gpt-6-astra")
 	require.Contains(t, DefaultModelIDs(), "gpt-6.2-astra")
+	require.Contains(t, DefaultModelIDs(), "gpt-6.2-sol")
 	require.Contains(t, DefaultModelIDs(), "gpt-6")
 	displayNames := make(map[string]string)
 	for _, model := range DefaultModels {
@@ -20,6 +21,7 @@ func TestDefaultModelsIncludeGPT6Astra(t *testing.T) {
 	}
 	require.Equal(t, "GPT-6 Astra", displayNames["gpt-6-astra"])
 	require.Equal(t, "GPT-6.2 Astra", displayNames["gpt-6.2-astra"])
+	require.Equal(t, "GPT-6.2 Sol", displayNames["gpt-6.2-sol"])
 }
 
 func TestDefaultModelsPreferConcreteGPT56SolForAccountTests(t *testing.T) {
