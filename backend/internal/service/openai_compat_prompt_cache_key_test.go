@@ -2,10 +2,13 @@ package service
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -95,6 +98,66 @@ func TestDeriveCompatPromptCacheKey_DiffersAcrossSessions(t *testing.T) {
 	k1 := deriveCompatPromptCacheKey(req1, "gpt-5.4")
 	k2 := deriveCompatPromptCacheKey(req2, "gpt-5.4")
 	require.NotEqual(t, k1, k2, "different first user messages should yield different keys")
+}
+
+func TestDeriveCompatPromptCacheKey_IncludesDeveloperPrefix(t *testing.T) {
+	base := &apicompat.ChatCompletionsRequest{
+		Model: "gpt-6.2-astra",
+		Messages: []apicompat.ChatMessage{
+			{Role: "developer", Content: mustRawJSON(t, `"policy-a"`)},
+			{Role: "user", Content: mustRawJSON(t, `"same prompt"`)},
+		},
+	}
+	changed := &apicompat.ChatCompletionsRequest{
+		Model: "gpt-6.2-astra",
+		Messages: []apicompat.ChatMessage{
+			{Role: "developer", Content: mustRawJSON(t, `"policy-b"`)},
+			{Role: "user", Content: mustRawJSON(t, `"same prompt"`)},
+		},
+	}
+
+	require.NotEqual(t, deriveCompatPromptCacheKey(base, base.Model), deriveCompatPromptCacheKey(changed, changed.Model))
+}
+
+func TestResolveChatCompletionsSession_UsesOneIdentityForRoutingAndForwarding(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	svc := &OpenAIGatewayService{}
+	body := []byte(`{"model":"gpt-6.2-astra","messages":[{"role":"developer","content":"Keep the prefix stable"},{"role":"user","content":"hello"}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]}`)
+
+	sessionHash, promptCacheKey := svc.ResolveChatCompletionsSession(c, body, "gpt-6.2-astra")
+
+	require.NotEmpty(t, promptCacheKey)
+	require.True(t, strings.HasPrefix(promptCacheKey, compatPromptCacheKeyPrefix))
+	require.Equal(t, DeriveSessionHashFromSeed(promptCacheKey), sessionHash)
+}
+
+func TestResolveChatCompletionsSession_PreservesExplicitIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Request.Header.Set("session_id", "client-session")
+	svc := &OpenAIGatewayService{}
+	body := []byte(`{"model":"gpt-6.2-sol","messages":[{"role":"user","content":"hello"}]}`)
+
+	sessionHash, promptCacheKey := svc.ResolveChatCompletionsSession(c, body, "gpt-6.2-sol")
+
+	require.Equal(t, "client-session", promptCacheKey)
+	require.Equal(t, DeriveSessionHashFromSeed("client-session"), sessionHash)
+}
+
+func TestResolveChatCompletionsSession_DoesNotSynthesizeForResponsesShape(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	svc := &OpenAIGatewayService{}
+	body := []byte(`{"model":"gpt-6.2-astra","input":[{"role":"user","content":"hello"}]}`)
+
+	sessionHash, promptCacheKey := svc.ResolveChatCompletionsSession(c, body, "gpt-6.2-astra")
+
+	require.Empty(t, promptCacheKey)
+	require.Equal(t, svc.GenerateSessionHash(c, body), sessionHash)
 }
 
 func TestDeriveCompatPromptCacheKey_UsesResolvedSparkFamily(t *testing.T) {

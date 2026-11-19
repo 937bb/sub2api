@@ -178,14 +178,17 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	}
 
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
-	compatPromptCacheInjected := false
+	// The handler may derive the compatibility key before account selection so
+	// the scheduler can use the same identity. Preserve the existing API-key
+	// tenant isolation for that pre-resolved key.
+	compatPromptCacheInjected := strings.HasPrefix(promptCacheKey, compatPromptCacheKeyPrefix)
 	if promptCacheKey == "" && !isResponsesShape && (account.UsesOpenAICodexProtocol() || account.IsOpenAIApiKey()) && shouldAutoInjectPromptCacheKeyForCompat(upstreamModel) {
 		promptCacheKey = deriveCompatPromptCacheKey(&chatReq, upstreamModel)
 		compatPromptCacheInjected = promptCacheKey != ""
-		if compatPromptCacheInjected && account.IsOpenAIApiKey() {
-			promptCacheKey = isolateOpenAISessionID(getAPIKeyIDFromContext(c), promptCacheKey)
-			compatPromptCacheTenantIsolated = true
-		}
+	}
+	if compatPromptCacheInjected && account.IsOpenAIApiKey() && !compatPromptCacheTenantIsolated {
+		promptCacheKey = isolateOpenAISessionID(getAPIKeyIDFromContext(c), promptCacheKey)
+		compatPromptCacheTenantIsolated = true
 	}
 
 	// 3. Build the upstream (Responses API) body.

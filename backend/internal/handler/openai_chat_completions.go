@@ -158,8 +158,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 	defer inflightRelease()
 
-	sessionHash := h.gatewayService.GenerateSessionHash(c, body)
-	promptCacheKey := h.gatewayService.ExtractSessionID(c, body)
+	sessionHash, promptCacheKey := h.gatewayService.ResolveChatCompletionsSession(c, body, forwardModel)
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0

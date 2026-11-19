@@ -8,6 +8,8 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 const compatPromptCacheKeyPrefix = "compat_cc_"
@@ -62,7 +64,7 @@ func deriveCompatPromptCacheKey(req *apicompat.ChatCompletionsRequest, mappedMod
 	firstUserCaptured := false
 	for _, msg := range req.Messages {
 		switch strings.TrimSpace(msg.Role) {
-		case "system":
+		case "system", "developer":
 			seedParts = append(seedParts, "system="+normalizeCompatSeedJSON(msg.Content))
 		case "user":
 			if !firstUserCaptured {
@@ -73,6 +75,42 @@ func deriveCompatPromptCacheKey(req *apicompat.ChatCompletionsRequest, mappedMod
 	}
 
 	return compatPromptCacheKeyPrefix + hashSensitiveValueForLog(strings.Join(seedParts, "|"))
+}
+
+// ResolveChatCompletionsSession resolves the cache identity before account
+// selection so sticky routing and the upstream prompt_cache_key use the same
+// seed. Previously the scheduler used a separately derived content hash while
+// ForwardAsChatCompletions generated the compatibility key after selecting an
+// account. Small differences between those derivations could move one
+// conversation across gateway accounts and split the upstream cache namespace.
+func (s *OpenAIGatewayService) ResolveChatCompletionsSession(c *gin.Context, body []byte, mappedModel string) (sessionHash, promptCacheKey string) {
+	promptCacheKey = s.ExtractSessionID(c, body)
+	if promptCacheKey != "" {
+		return s.GenerateSessionHash(c, body), promptCacheKey
+	}
+
+	// Some clients send a Responses-shaped payload to /v1/chat/completions.
+	// That path already carries its own Responses cache semantics and must not
+	// receive a Chat Completions identity synthesized from a model-only body.
+	if !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists() {
+		return s.GenerateSessionHash(c, body), ""
+	}
+	if !shouldAutoInjectPromptCacheKeyForCompat(mappedModel) {
+		return s.GenerateSessionHash(c, body), ""
+	}
+
+	var req apicompat.ChatCompletionsRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return s.GenerateSessionHash(c, body), ""
+	}
+	promptCacheKey = deriveCompatPromptCacheKey(&req, mappedModel)
+	if promptCacheKey == "" {
+		return s.GenerateSessionHash(c, body), ""
+	}
+
+	currentHash, legacyHash := deriveOpenAISessionHashes(promptCacheKey)
+	attachOpenAILegacySessionHashToGin(c, legacyHash)
+	return currentHash, promptCacheKey
 }
 
 func deriveAnthropicCompatPromptCacheKey(req *apicompat.AnthropicRequest, mappedModel string) string {

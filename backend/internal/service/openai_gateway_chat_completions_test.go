@@ -833,6 +833,36 @@ func TestForwardAsChatCompletions_APIKeyAutoDerivesStableIsolatedPromptCacheKey(
 	require.NotEqual(t, upstream.requests[1].Header.Get("session_id"), upstream.requests[2].Header.Get("session_id"))
 }
 
+func TestForwardAsChatCompletions_APIKeyPreResolvedCompatKeyIsIsolatedOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"stop before response parsing"}}`)),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 2, Name: "pool", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-compatible"},
+		Extra:       map[string]any{"openai_responses_supported": true},
+	}
+	body := []byte(`{"model":"gpt-6.2-astra","messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Set("api_key", &APIKey{ID: 99})
+	rawKey := compatPromptCacheKeyPrefix + "pre-resolved"
+
+	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, rawKey, "gpt-6.2-astra")
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	want := isolateOpenAISessionID(99, rawKey)
+	require.Equal(t, want, gjson.GetBytes(upstream.lastBody, "prompt_cache_key").String())
+	require.Equal(t, generateSessionUUID(want), upstream.lastReq.Header.Get("session_id"))
+}
+
 func TestForwardAsChatCompletions_GPT62FamiliesAutoDeriveStablePromptCacheKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
