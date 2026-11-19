@@ -174,36 +174,16 @@ func TestGPT6SolLunaCompatCacheIdentity(t *testing.T) {
 	}
 }
 
-func TestGPT62CompatCacheIdentity(t *testing.T) {
+func TestGPT62CompatCacheIdentityUsesNativeClientPolicy(t *testing.T) {
 	for _, model := range []string{
 		"gpt-6.2-sol",
 		"openai/gpt-6.2-sol-max",
 		"gpt-6.2-astra",
 		"OPENAI/GPT_6.2_ASTRA_HIGH",
 	} {
-		require.True(t, shouldAutoInjectPromptCacheKeyForCompat(model), model)
+		require.False(t, shouldAutoInjectPromptCacheKeyForCompat(model), model)
 	}
 	for _, model := range []string{"gpt-6.2", "gpt-6.2-sol-preview", "gpt-6.2-astra-preview"} {
 		require.False(t, shouldAutoInjectPromptCacheKeyForCompat(model), model)
 	}
-
-	base := &apicompat.ChatCompletionsRequest{
-		Model: "gpt-6.2-sol",
-		Messages: []apicompat.ChatMessage{
-			{Role: "system", Content: mustRawJSON(t, `"You are helpful."`)},
-			{Role: "user", Content: mustRawJSON(t, `"Keep this session stable"`)},
-		},
-	}
-	extended := &apicompat.ChatCompletionsRequest{
-		Model: "gpt-6.2-sol",
-		Messages: append(append([]apicompat.ChatMessage{}, base.Messages...),
-			apicompat.ChatMessage{Role: "assistant", Content: mustRawJSON(t, `"Ready"`)},
-			apicompat.ChatMessage{Role: "user", Content: mustRawJSON(t, `"Continue"`)},
-		),
-	}
-
-	solKey := deriveCompatPromptCacheKey(base, "gpt-6.2-sol")
-	require.NotEmpty(t, solKey)
-	require.Equal(t, solKey, deriveCompatPromptCacheKey(extended, "openai/gpt-6.2-sol-max"))
-	require.NotEqual(t, solKey, deriveCompatPromptCacheKey(base, "gpt-6.2-astra"))
 }
