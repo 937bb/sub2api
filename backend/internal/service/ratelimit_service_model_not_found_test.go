@@ -217,6 +217,62 @@ func TestRateLimitService_HandleTempUnschedulable_PoolModeCustomPolicyUsesModelS
 	require.Equal(t, "gpt-5.4", repo.modelRateLimitCalls[0].scope)
 }
 
+func TestRateLimitService_PoolModelNotFoundDoesNotPersistRelayObservation(t *testing.T) {
+	for _, entry := range []string{"writer", "shared-policy", "openai-fastpath"} {
+		t.Run(entry, func(t *testing.T) {
+			repo := &modelNotFoundAccountRepoStub{}
+			rateLimits := &RateLimitService{accountRepo: repo}
+			gateway := &OpenAIGatewayService{rateLimitService: rateLimits}
+			account := &Account{
+				ID:          70905,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeAPIKey,
+				Status:      StatusActive,
+				Schedulable: true,
+				Credentials: map[string]any{"pool_mode": true},
+			}
+			body := []byte(`{"error":{"code":"model_not_found","message":"unknown model gpt-6.2-astra"}}`)
+
+			switch entry {
+			case "writer":
+				rateLimits.HandleUpstreamModelNotFound(context.Background(), account, "gpt-6.2-astra", http.StatusNotFound, body)
+			case "shared-policy":
+				rateLimits.HandleUpstreamError(context.Background(), account, http.StatusNotFound, http.Header{}, body, "gpt-6.2-astra")
+			case "openai-fastpath":
+				gateway.handleOpenAIAccountUpstreamError(context.Background(), account, http.StatusNotFound, http.Header{}, body, "gpt-6.2-astra")
+			}
+
+			require.Empty(t, repo.modelRateLimitCalls)
+			require.Zero(t, repo.tempCalls)
+		})
+	}
+}
+
+func TestRateLimitService_PoolModelNotFoundExplicitPolicyStillPersists(t *testing.T) {
+	repo := &modelNotFoundAccountRepoStub{}
+	rateLimits := &RateLimitService{accountRepo: repo}
+	account := &Account{
+		ID:          70905,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Credentials: map[string]any{
+			"pool_mode":                  true,
+			"custom_error_codes_enabled": true,
+			"custom_error_codes":         []any{float64(http.StatusNotFound)},
+		},
+	}
+	body := []byte(`{"error":{"code":"model_not_found","message":"unknown model gpt-6.2-astra"}}`)
+
+	handled := rateLimits.HandleUpstreamModelNotFound(context.Background(), account, "gpt-6.2-astra", http.StatusNotFound, body)
+
+	require.True(t, handled)
+	require.Len(t, repo.modelRateLimitCalls, 1)
+	require.Equal(t, "gpt-6.2-astra", repo.modelRateLimitCalls[0].scope)
+	require.Equal(t, upstreamModelNotFoundReason, repo.modelRateLimitCalls[0].reason)
+}
+
 func TestRateLimitService_TempUnschedulableContextPreservesModelForPoolDependency(t *testing.T) {
 	repo := &modelNotFoundAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}

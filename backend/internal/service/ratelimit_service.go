@@ -2563,6 +2563,14 @@ func (s *RateLimitService) HandleUpstreamModelNotFound(ctx context.Context, acco
 	if s == nil || account == nil || s.accountRepo == nil {
 		return false
 	}
+	// Pool relays own the availability of their member accounts. A transient
+	// model-not-found observation from the relay must not become a fresh local
+	// negative cache, otherwise B can keep renewing a model cooldown after P has
+	// already recovered. Explicit administrator error-code policy remains
+	// authoritative; configured temporary rules are evaluated by the caller.
+	if account.IsPoolMode() && !account.IsCustomErrorCodesEnabled() {
+		return false
+	}
 	if !account.ShouldHandleErrorCode(statusCode) {
 		return false
 	}
