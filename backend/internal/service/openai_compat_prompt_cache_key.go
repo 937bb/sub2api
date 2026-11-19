@@ -15,11 +15,9 @@ const compatPromptCacheKeyPrefix = "compat_cc_"
 func shouldAutoInjectPromptCacheKeyForCompat(model string) bool {
 	trimmed := strings.TrimSpace(strings.ToLower(model))
 	canonical := canonicalizeOpenAIModelAliasSpelling(trimmed)
-	// Keep the upstream sub2api compatibility scope. GPT-6.2 remains a valid
-	// routed model, but the gateway must not synthesize a cache identity for it:
-	// native clients either provide prompt_cache_key themselves or let OpenAI
-	// apply its normal prefix-cache behavior.
-	if canonical == "gpt-6" || canonical == "gpt-6-astra" || openai.IsGPT6SolOrLunaModelSpelling(canonical) || openai.IsGPT61SolModelSpelling(canonical) || openai.IsGPT61TerraModelSpelling(canonical) {
+	// Keep this aligned with the upstream model-family recognizers so new
+	// published GPT-6.2 effort spellings inherit the same stable cache policy.
+	if openai.GPT62ModelID(canonical) != "" || canonical == "gpt-6" || canonical == "gpt-6-astra" || openai.IsGPT6SolOrLunaModelSpelling(canonical) || openai.IsGPT61SolModelSpelling(canonical) || openai.IsGPT61TerraModelSpelling(canonical) {
 		return true
 	}
 	// 仅对 Responses 兼容路径支持的 GPT-5 族开启自动注入，避免 normalizeCodexModel

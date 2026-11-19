@@ -174,14 +174,14 @@ func TestGPT6SolLunaCompatCacheIdentity(t *testing.T) {
 	}
 }
 
-func TestGPT62CompatCacheIdentityUsesNativeClientPolicy(t *testing.T) {
+func TestGPT62CompatCacheIdentityUsesOfficialModelRecognizer(t *testing.T) {
 	for _, model := range []string{
 		"gpt-6.2-sol",
 		"openai/gpt-6.2-sol-max",
 		"gpt-6.2-astra",
 		"OPENAI/GPT_6.2_ASTRA_HIGH",
 	} {
-		require.False(t, shouldAutoInjectPromptCacheKeyForCompat(model), model)
+		require.True(t, shouldAutoInjectPromptCacheKeyForCompat(model), model)
 	}
 	for _, model := range []string{"gpt-6.2", "gpt-6.2-sol-preview", "gpt-6.2-astra-preview"} {
 		require.False(t, shouldAutoInjectPromptCacheKeyForCompat(model), model)

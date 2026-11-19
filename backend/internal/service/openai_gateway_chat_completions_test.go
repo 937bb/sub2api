@@ -833,6 +833,53 @@ func TestForwardAsChatCompletions_APIKeyAutoDerivesStableIsolatedPromptCacheKey(
 	require.NotEqual(t, upstream.requests[1].Header.Get("session_id"), upstream.requests[2].Header.Get("session_id"))
 }
 
+func TestForwardAsChatCompletions_GPT62FamiliesAutoDeriveStablePromptCacheKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	response := func() *http.Response {
+		return &http.Response{
+			StatusCode: http.StatusBadRequest,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"stop before response parsing"}}`)),
+		}
+	}
+	upstream := &httpUpstreamRecorder{responses: []*http.Response{response(), response(), response(), response()}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	account := &Account{
+		ID: 2, Name: "pool", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-compatible"},
+		Extra:       map[string]any{"openai_responses_supported": true},
+	}
+
+	forward := func(model string, appended bool) {
+		messages := `[{"role":"system","content":"be concise"},{"role":"user","content":"hello"}]`
+		if appended {
+			messages = `[{"role":"system","content":"be concise"},{"role":"user","content":"hello"},{"role":"assistant","content":"hi"},{"role":"user","content":"continue"}]`
+		}
+		body := []byte(`{"model":"` + model + `","messages":` + messages + `,"stream":false}`)
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+		c.Set("api_key", &APIKey{ID: 99})
+		result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", model)
+		require.Error(t, err)
+		require.Nil(t, result)
+	}
+
+	forward("gpt-6.2-astra", false)
+	forward("gpt-6.2-astra", true)
+	forward("gpt-6.2-sol", false)
+	forward("gpt-6.2-sol", true)
+
+	astraKey := gjson.GetBytes(upstream.bodies[0], "prompt_cache_key").String()
+	solKey := gjson.GetBytes(upstream.bodies[2], "prompt_cache_key").String()
+	require.NotEmpty(t, astraKey)
+	require.Equal(t, astraKey, gjson.GetBytes(upstream.bodies[1], "prompt_cache_key").String())
+	require.NotEmpty(t, solKey)
+	require.Equal(t, solKey, gjson.GetBytes(upstream.bodies[3], "prompt_cache_key").String())
+	require.NotEqual(t, astraKey, solKey)
+}
+
 func TestForwardAsChatCompletions_ResponsesShapeDoesNotAutoDerivePromptCacheKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

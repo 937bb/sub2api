@@ -255,33 +255,31 @@ func IsGPT61TerraModelSpelling(model string) bool {
 	}
 }
 
-// IsGPT62SolModelSpelling recognizes the published GPT-6.2 Sol model and the
-// local effort/compact aliases accepted by the compatibility gateway.
-func IsGPT62SolModelSpelling(model string) bool {
-	return isGPT62FamilyModelSpelling(model, "gpt-6.2-sol")
-}
-
-// IsGPT62AstraModelSpelling recognizes the published GPT-6.2 Astra model and
-// the local effort/compact aliases accepted by the compatibility gateway.
-func IsGPT62AstraModelSpelling(model string) bool {
-	return isGPT62FamilyModelSpelling(model, "gpt-6.2-astra")
-}
-
-func isGPT62FamilyModelSpelling(model, base string) bool {
+// GPT62ModelID returns the published GPT-6.2 model ID for every supported
+// effort and compact spelling. Callers share this recognizer instead of
+// maintaining separate Sol and Astra suffix lists.
+func GPT62ModelID(model string) string {
 	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
-	if canonical == base {
-		return true
+	for _, base := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
+		if canonical == base {
+			return base
+		}
+		if suffix, ok := strings.CutPrefix(canonical, base+"-"); ok {
+			switch suffix {
+			case "none", "minimal", "low", "medium", "high", "xhigh", "max", "openai-compact":
+				return base
+			}
+		}
 	}
-	suffix, ok := strings.CutPrefix(canonical, base+"-")
-	if !ok {
-		return false
-	}
-	switch suffix {
-	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "openai-compact":
-		return true
-	default:
-		return false
-	}
+	return ""
+}
+
+func IsGPT62SolModelSpelling(model string) bool {
+	return GPT62ModelID(model) == "gpt-6.2-sol"
+}
+
+func IsGPT62AstraModelSpelling(model string) bool {
+	return GPT62ModelID(model) == "gpt-6.2-astra"
 }
 
 // RequiresResponsesForToolCalls reports models whose tool calls are only

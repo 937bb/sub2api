@@ -67,14 +67,17 @@ func TestGPT61SolIdentityAndEffort(t *testing.T) {
 
 func TestGPT62ModelIdentity(t *testing.T) {
 	for _, id := range []string{"gpt-6.2-sol", "openai/gpt-6.2-sol-max", "GPT_6.2_SOL", "gpt-6.2-sol-openai-compact"} {
+		require.Equal(t, "gpt-6.2-sol", GPT62ModelID(id), id)
 		require.True(t, IsGPT62SolModelSpelling(id), id)
 		require.False(t, IsGPT62AstraModelSpelling(id), id)
 	}
 	for _, id := range []string{"gpt-6.2-astra", "openai/gpt-6.2-astra-high", "GPT_6.2_ASTRA", "gpt-6.2-astra-openai-compact"} {
+		require.Equal(t, "gpt-6.2-astra", GPT62ModelID(id), id)
 		require.True(t, IsGPT62AstraModelSpelling(id), id)
 		require.False(t, IsGPT62SolModelSpelling(id), id)
 	}
 	for _, id := range []string{"gpt-6.2", "gpt-6.2-solitude", "gpt-6.2-sol-preview", "gpt-6.2-astra-preview", "gpt-6.1-sol"} {
+		require.Empty(t, GPT62ModelID(id), id)
 		require.False(t, IsGPT62SolModelSpelling(id), id)
 		require.False(t, IsGPT62AstraModelSpelling(id), id)
 	}
