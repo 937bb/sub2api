@@ -255,6 +255,35 @@ func IsGPT61TerraModelSpelling(model string) bool {
 	}
 }
 
+// IsGPT62SolModelSpelling recognizes the published GPT-6.2 Sol model and the
+// local effort/compact aliases accepted by the compatibility gateway.
+func IsGPT62SolModelSpelling(model string) bool {
+	return isGPT62FamilyModelSpelling(model, "gpt-6.2-sol")
+}
+
+// IsGPT62AstraModelSpelling recognizes the published GPT-6.2 Astra model and
+// the local effort/compact aliases accepted by the compatibility gateway.
+func IsGPT62AstraModelSpelling(model string) bool {
+	return isGPT62FamilyModelSpelling(model, "gpt-6.2-astra")
+}
+
+func isGPT62FamilyModelSpelling(model, base string) bool {
+	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
+	if canonical == base {
+		return true
+	}
+	suffix, ok := strings.CutPrefix(canonical, base+"-")
+	if !ok {
+		return false
+	}
+	switch suffix {
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "openai-compact":
+		return true
+	default:
+		return false
+	}
+}
+
 // RequiresResponsesForToolCalls reports models whose tool calls are only
 // available through the Responses API.
 func RequiresResponsesForToolCalls(model string) bool {
