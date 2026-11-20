@@ -1418,7 +1418,10 @@ func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
 	switch {
 	case strings.Contains(combined, "rate_limit"):
 		return http.StatusTooManyRequests
-	case strings.Contains(errType, "invalid_request"):
+	case strings.Contains(combined, "invalid_request") ||
+		strings.Contains(combined, "content_policy") ||
+		strings.Contains(combined, "policy_violation") ||
+		strings.Contains(combined, "safety_violation"):
 		return http.StatusBadRequest
 	case strings.Contains(combined, "authentication") || strings.Contains(combined, "unauthorized") || strings.Contains(combined, "invalid_api_key"):
 		return http.StatusUnauthorized
@@ -1442,6 +1445,14 @@ func openAIStreamFailureStatus(payload []byte, message string) int {
 	}
 	semanticStatus := openAIStreamFailedEventSemanticStatus(payload, message)
 	switch semanticStatus {
+	case http.StatusBadRequest:
+		// HTTP 200 SSE can carry a deterministic request rejection in its terminal
+		// response.failed event. Preserve 400 only when this is not one of the
+		// transient/capacity errors that OpenAI also labels invalid_request_error.
+		if !isOpenAIUpstreamCapacityShedEvent(payload) &&
+			!isOpenAITransientProcessingError(http.StatusBadRequest, message, payload) {
+			return semanticStatus
+		}
 	case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests, 529:
 		return semanticStatus
 	case http.StatusServiceUnavailable:
@@ -2411,7 +2422,7 @@ func (s *OpenAIGatewayService) handlePassthroughSSEToJSON(resp *http.Response, c
 		if failoverErr := s.nonStreamingTerminalFailureFailover(c, resp, account, true, terminalType, terminalPayload, msg, mappedModel); failoverErr != nil {
 			return nil, failoverErr
 		}
-		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, msg)
+		return nil, s.writeOpenAINonStreamingProtocolError(resp, c, terminalPayload, msg)
 	}
 	finalResponse, ok := extractCodexFinalResponse(bodyText)
 	if !ok && terminalOK {

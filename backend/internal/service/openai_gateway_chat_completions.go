@@ -741,7 +741,11 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 			writeChatCompletionsError(c, status, errType, errMsg)
 			return nil, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
 		}
-		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", message)
+		statusCode, errType := http.StatusBadGateway, "upstream_error"
+		if openAIStreamFailureStatus(payload, message) == http.StatusBadRequest {
+			statusCode, errType = http.StatusBadRequest, "invalid_request_error"
+		}
+		writeChatCompletionsError(c, statusCode, errType, message)
 		return nil, fmt.Errorf("upstream response failed: %s", message)
 	}
 	if strings.TrimSpace(finalResponse.Status) == "completed" {
@@ -988,6 +992,9 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			}
 			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
 			defaultStatus, defaultErrType, defaultMsg := http.StatusBadGateway, "upstream_error", message
+			if openAIStreamFailureStatus(payloadBytes, message) == http.StatusBadRequest {
+				defaultStatus, defaultErrType = http.StatusBadRequest, "invalid_request_error"
+			}
 			// 统一走语义状态推断 + body 归一化（与 /v1/responses 路径一致），
 			// 使按错误码配置的透传规则可命中。
 			if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(
