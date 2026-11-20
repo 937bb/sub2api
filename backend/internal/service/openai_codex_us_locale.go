@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/tidwall/gjson"
 )
@@ -236,8 +237,12 @@ func normalizeCodexOutboundRequest(body []byte, account *Account) ([]byte, bool,
 	if err != nil {
 		return body, false, err
 	}
-	next, roleChanged, err := normalizeCodexDeveloperMessages(localized, account)
-	return next, localeChanged || roleChanged, err
+	cacheAligned, cacheChanged, err := normalizeGPT62InstructionsForCache(localized, account, time.Now())
+	if err != nil {
+		return body, false, err
+	}
+	next, roleChanged, err := normalizeCodexDeveloperMessages(cacheAligned, account)
+	return next, localeChanged || cacheChanged || roleChanged, err
 }
 
 // Clone only changed maps/slices: pooled WS payloads may share nested history

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	openaiapi "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/tidwall/gjson"
@@ -49,6 +50,11 @@ func normalizeCodexDeveloperMessages(body []byte, account *Account) ([]byte, boo
 		return body, false, fmt.Errorf("normalize Codex developer messages: invalid JSON object")
 	}
 	if event := root.Get("type"); event.Exists() && event.String() != "response.create" {
+		return body, false, nil
+	}
+	// GPT-6.2 uses a cacheable developer prefix for stable instructions while
+	// retaining actual user turns as user messages.
+	if openaiapi.GPT62ModelID(root.Get("model").String()) != "" {
 		return body, false, nil
 	}
 	input := root.Get("input")
