@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"log/slog"
 	"math/big"
 	"net"
@@ -18,6 +19,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -194,6 +196,8 @@ func (s *EmailService) SendEmail(ctx context.Context, to, subject, body string) 
 
 const smtpDialTimeout = 10 * time.Second
 const smtpIOTimeout = 20 * time.Second
+const smtpConnectAttempts = 3
+const smtpConnectRetryDelay = 200 * time.Millisecond
 
 // SendEmailWithConfig 使用指定配置发送邮件
 func (s *EmailService) SendEmailWithConfig(config *SMTPConfig, to, subject, body string) error {
@@ -254,6 +258,24 @@ func smtpTLSConfig(host string) *tls.Config {
 //   - UseTLS=false：明文连接后若服务器支持 STARTTLS 则机会式升级，
 //     与 smtp.SendMail 的默认行为一致。
 func (s *EmailService) connectSMTP(config *SMTPConfig) (*smtp.Client, error) {
+	var lastErr error
+	for attempt := 1; attempt <= smtpConnectAttempts; attempt++ {
+		client, err := s.connectSMTPOnce(config)
+		if err == nil {
+			return client, nil
+		}
+		lastErr = err
+		if attempt == smtpConnectAttempts || !isTransientSMTPConnectError(err) {
+			break
+		}
+		time.Sleep(time.Duration(attempt) * smtpConnectRetryDelay)
+	}
+	return nil, lastErr
+}
+
+// connectSMTPOnce performs one connection attempt. Retry is deliberately
+// limited to this pre-AUTH stage so an accepted message is never sent twice.
+func (s *EmailService) connectSMTPOnce(config *SMTPConfig) (*smtp.Client, error) {
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
 	dialer := &net.Dialer{Timeout: smtpDialTimeout}
 	tlsConfig := smtpTLSConfig(config.Host)
@@ -273,6 +295,18 @@ func (s *EmailService) connectSMTP(config *SMTPConfig) (*smtp.Client, error) {
 	}
 
 	return s.connectSMTPStartTLS(dialer, addr, config.Host, tlsConfig, false)
+}
+
+func isTransientSMTPConnectError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 // connectSMTPStartTLS 建立明文连接并按需升级 STARTTLS。
@@ -350,6 +384,24 @@ func (s *EmailService) SendVerifyCode(ctx context.Context, email, siteName strin
 	if err := s.cache.SetVerificationCode(ctx, email, data, verifyCodeTTL); err != nil {
 		return fmt.Errorf("save verify code: %w", err)
 	}
+	delivered := false
+	defer func() {
+		if delivered {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		current, getErr := s.cache.GetVerificationCode(cleanupCtx, email)
+		if getErr != nil || current == nil || current.Code != code {
+			return
+		}
+		if deleteErr := s.cache.DeleteVerificationCode(cleanupCtx, email); deleteErr != nil {
+			slog.Warn("failed to remove undelivered verification code",
+				"recipient_hash", notificationEmailHash(email),
+				"error", deleteErr,
+			)
+		}
+	}()
 
 	if s.notificationEmailService != nil {
 		err := s.notificationEmailService.Send(ctx, NotificationEmailSendInput{
@@ -363,6 +415,7 @@ func (s *EmailService) SendVerifyCode(ctx context.Context, email, siteName strin
 			},
 		})
 		if err == nil {
+			delivered = true
 			return nil
 		}
 		if !shouldFallbackNotificationEmail(err) {
@@ -380,6 +433,7 @@ func (s *EmailService) SendVerifyCode(ctx context.Context, email, siteName strin
 		return fmt.Errorf("send email: %w", err)
 	}
 
+	delivered = true
 	return nil
 }
 

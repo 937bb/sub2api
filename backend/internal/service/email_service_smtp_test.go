@@ -4,6 +4,7 @@ package service
 
 import (
 	"bufio"
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -12,6 +13,7 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -58,10 +60,27 @@ type fakeSMTPServer struct {
 	tlsConfig         *tls.Config
 	advertiseStartTLS bool
 
-	mu       sync.Mutex
-	commands []string
-	conns    atomic.Int64
-	wg       sync.WaitGroup
+	mu                      sync.Mutex
+	commands                []string
+	conns                   atomic.Int64
+	dropGreetingConnections atomic.Int64
+	wg                      sync.WaitGroup
+}
+
+type trackingVerificationCodeCache struct {
+	emailCacheStub
+	deleted int
+}
+
+func (s *trackingVerificationCodeCache) SetVerificationCode(_ context.Context, _ string, data *VerificationCodeData, _ time.Duration) error {
+	s.data = data
+	return nil
+}
+
+func (s *trackingVerificationCodeCache) DeleteVerificationCode(_ context.Context, _ string) error {
+	s.deleted++
+	s.data = nil
+	return nil
 }
 
 func startFakeSMTPServer(t *testing.T, implicitTLS, advertiseStartTLS bool) (*fakeSMTPServer, int) {
@@ -101,6 +120,9 @@ func startFakeSMTPServer(t *testing.T, implicitTLS, advertiseStartTLS bool) (*fa
 			go func() {
 				defer srv.wg.Done()
 				defer func() { _ = conn.Close() }()
+				if srv.dropGreetingConnections.Load() > 0 && srv.dropGreetingConnections.Add(-1) >= 0 {
+					return
+				}
 				_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 				srv.serve(conn, srv.advertiseStartTLS)
 			}()
@@ -290,6 +312,19 @@ func TestSMTPConnectionImplicitTLS(t *testing.T) {
 	}
 }
 
+func TestSMTPConnectionRetriesGreetingEOF(t *testing.T) {
+	srv, port := startFakeSMTPServer(t, true, false)
+	srv.dropGreetingConnections.Store(1)
+	svc := &EmailService{}
+
+	if err := svc.TestSMTPConnectionWithConfig(smtpTestConfig(port, true)); err != nil {
+		t.Fatalf("expected transient greeting EOF to be retried, got: %v", err)
+	}
+	if got := srv.conns.Load(); got < 2 {
+		t.Fatalf("expected a retry after greeting EOF, got %d connections", got)
+	}
+}
+
 // 587 语义（#1470/#1488 核心场景）：UseTLS=true + 明文问候的 STARTTLS 服务器，
 // 隐式 TLS 失败后必须自动降级为强制 STARTTLS 并成功。
 func TestSMTPConnectionStartTLSFallbackWhenTLSEnabled(t *testing.T) {
@@ -379,5 +414,27 @@ func TestSendEmailWithConfigImplicitTLS(t *testing.T) {
 	}
 	if !srv.sawCommand("DATA") {
 		t.Fatal("expected send path to reach DATA")
+	}
+}
+
+func TestSendVerifyCodeClearsCooldownWhenSMTPDeliveryFails(t *testing.T) {
+	_, port := startFakeSMTPServer(t, false, false)
+	cache := &trackingVerificationCodeCache{}
+	repo := &settingRepoStub{values: map[string]string{
+		SettingKeySMTPHost:     "127.0.0.1",
+		SettingKeySMTPPort:     strconv.Itoa(port),
+		SettingKeySMTPUsername: "user",
+		SettingKeySMTPPassword: "pass",
+		SettingKeySMTPFrom:     "noreply@example.com",
+		SettingKeySMTPUseTLS:   "true",
+	}}
+	svc := NewEmailService(repo, cache)
+
+	err := svc.SendVerifyCode(context.Background(), "rcpt@example.com", "Test")
+	if err == nil {
+		t.Fatal("expected SMTP delivery to fail")
+	}
+	if cache.deleted != 1 || cache.data != nil {
+		t.Fatalf("expected undelivered verification code to be removed, deleted=%d data=%v", cache.deleted, cache.data)
 	}
 }
