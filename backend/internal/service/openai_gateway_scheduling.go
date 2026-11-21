@@ -1408,6 +1408,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				if sessionHash != "" && !stickySpillover && !gatewayProfitControlGateActive(ctx) {
 					_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, fresh.ID, openaiStickySessionTTL)
 				}
+				selection.preserveStickyBinding = stickySpillover
 				return selection, true, nil
 			}
 		}
@@ -1447,15 +1448,18 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				if sessionHash != "" && !stickySpillover && !gatewayProfitControlGateActive(ctx) {
 					_ = s.setStickySessionAccountID(ctx, groupID, sessionHash, fresh.ID, openaiStickySessionTTL)
 				}
+				selection.preserveStickyBinding = stickySpillover
 				return selection, nil
 			}
 		}
 	} else {
-		if selection, attempted, selectErr := tryAcquireFromLoadMap(loadMap); selectErr != nil {
+		if selection, _, selectErr := tryAcquireFromLoadMap(loadMap); selectErr != nil {
 			return nil, selectErr
 		} else if selection != nil {
 			return selection, nil
-		} else if attempted {
+		} else {
+			// Even an all-full snapshot can be stale. Refresh once before
+			// queueing so released capacity on another account remains usable.
 			if freshLoadMap, loadErr := s.concurrencyService.GetAccountsLoadBatchFresh(ctx, accountLoads); loadErr == nil {
 				if selection, _, selectErr := tryAcquireFromLoadMap(freshLoadMap); selectErr != nil {
 					return nil, selectErr
@@ -1467,6 +1471,21 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 
 	// ============ Layer 3: Fallback wait ============
+	// Keep a saturated candidate only to preserve the handler's queue-full
+	// response when no eligible account has waiting capacity.
+	var saturatedQueueAccount *Account
+	waitForAccount := func(account *Account) (*AccountSelectionResult, error) {
+		selection, err := s.newSelectionResult(ctx, account, false, nil, &AccountWaitPlan{
+			AccountID:      account.ID,
+			MaxConcurrency: account.Concurrency,
+			Timeout:        cfg.FallbackWaitTimeout,
+			MaxWaiting:     cfg.FallbackMaxWaiting,
+		})
+		if selection != nil {
+			selection.preserveStickyBinding = stickySpillover
+		}
+		return selection, err
+	}
 	sortAccountsByPriorityAndLastUsed(candidates, false)
 	if rateOrder.enabled {
 		sort.SliceStable(candidates, func(i, j int) bool {
@@ -1488,12 +1507,17 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
 			continue
 		}
-		return s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{
-			AccountID:      fresh.ID,
-			MaxConcurrency: fresh.Concurrency,
-			Timeout:        cfg.FallbackWaitTimeout,
-			MaxWaiting:     cfg.FallbackMaxWaiting,
-		})
+		waiting, waitErr := s.concurrencyService.GetAccountWaitingCount(ctx, fresh.ID)
+		if waitErr == nil && waiting >= cfg.FallbackMaxWaiting {
+			if saturatedQueueAccount == nil {
+				saturatedQueueAccount = fresh
+			}
+			continue
+		}
+		return waitForAccount(fresh)
+	}
+	if saturatedQueueAccount != nil {
+		return waitForAccount(saturatedQueueAccount)
 	}
 
 	if requireCompact && baseCandidateCount > 0 {
