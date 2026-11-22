@@ -560,6 +560,31 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 	}
 
+	var keepaliveTicks <-chan time.Time
+	if reqStream && s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
+		keepaliveInterval := time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
+		ticker := time.NewTicker(keepaliveInterval)
+		defer ticker.Stop()
+		keepaliveTicks = ticker.C
+	}
+	emitKeepalive := func() {
+		markClientRequestCanceled()
+		if clientDisconnected {
+			return
+		}
+		// Comments commit the SSE transport, but not a Responses event. Keep
+		// lifecycle frames private until output starts so early retries stay safe.
+		n, err := c.Writer.Write([]byte(":\n\n"))
+		recordOpenAIStreamKeepaliveBytes(c, n)
+		if err != nil {
+			markClientDisconnected("downstream_keepalive_error")
+			return
+		}
+		flusher.Flush()
+		pendingFlushEvents = 0
+		lastFlushAt = time.Now()
+	}
+
 	// Keep per-read timeouts unchanged for connected clients. Once a client
 	// disconnects, use the same timeout as a bounded total drain budget.
 	var pendingJSONDocuments [][]byte
@@ -585,7 +610,9 @@ readLoop:
 					currentReadTimeout = remaining
 				}
 			}
-			message, readErr = lease.ReadMessageWithContextTimeout(upstreamReadCtx, currentReadTimeout)
+			message, readErr = readOpenAIWSWithKeepalive(upstreamReadCtx, func(readCtx context.Context) ([]byte, error) {
+				return lease.ReadMessageWithContextTimeout(readCtx, currentReadTimeout)
+			}, keepaliveTicks, emitKeepalive)
 			if readErr == nil {
 				if documents, repaired := splitOpenAIConcatenatedJSONDocuments(message); repaired {
 					logOpenAIWSModeInfo(
