@@ -23,13 +23,17 @@ import (
 // --- shared test helpers ---
 
 type queuedHTTPUpstream struct {
-	responses []*http.Response
-	requests  []*http.Request
-	tlsFlags  []bool
+	responses  []*http.Response
+	requests   []*http.Request
+	tlsFlags   []bool
+	allowPlain bool
 }
 
-func (u *queuedHTTPUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
-	return nil, fmt.Errorf("unexpected Do call")
+func (u *queuedHTTPUpstream) Do(req *http.Request, proxy string, accountID int64, concurrency int) (*http.Response, error) {
+	if !u.allowPlain {
+		return nil, fmt.Errorf("unexpected Do call")
+	}
+	return u.DoWithTLS(req, proxy, accountID, concurrency, nil)
 }
 
 func (u *queuedHTTPUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, profile *tlsfingerprint.Profile) (*http.Response, error) {
@@ -537,7 +541,7 @@ func TestAccountTestService_OpenAIAPIKeyResponsesUsesCodexProbeHeaders(t *testin
 
 	resp := newJSONResponse(http.StatusOK, "")
 	resp.Body = io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))
-	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}, allowPlain: true}
 	svc := &AccountTestService{
 		httpUpstream: upstream,
 		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
@@ -557,6 +561,7 @@ func TestAccountTestService_OpenAIAPIKeyResponsesUsesCodexProbeHeaders(t *testin
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.NoError(t, err)
 	require.Len(t, upstream.requests, 1)
+	require.Equal(t, []bool{false}, upstream.tlsFlags)
 	req := upstream.requests[0]
 	require.Equal(t, "https://compat-upstream.example/v1/responses", req.URL.String())
 	requireOpenAICodexProbeHeaders(t, req.Header)
