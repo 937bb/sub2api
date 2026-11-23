@@ -6,11 +6,16 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// Codex injects the Goal objective as additional context after compaction or
-// continuation. It uses the function_call_output envelope without a tool call.
-// Recognize only this known shape; preserve the original item for forwarding.
-func isCodexGoalContextOutput(item map[string]any) bool {
-	if item["type"] != "function_call_output" || item["namespace"] != "agent" || item["name"] != "goal_objective" {
+// Codex AdditionalContextToolOutput carries dynamically named context (Goal,
+// browser pages, selections, etc.) in the agent namespace without a tool call.
+// Recognize its wire shape, not individual names, and preserve the original item.
+// A nonempty call_id always identifies an ordinary paired tool output.
+func isCodexAgentContextOutput(item map[string]any) bool {
+	if item["type"] != "function_call_output" || item["namespace"] != "agent" {
+		return false
+	}
+	name, ok := item["name"].(string)
+	if !ok || strings.TrimSpace(name) == "" {
 		return false
 	}
 	if _, ok := item["output"].(string); !ok {
@@ -24,8 +29,8 @@ func isCodexGoalContextOutput(item map[string]any) bool {
 	return ok && strings.TrimSpace(id) == ""
 }
 
-func isCodexGoalContextOutputJSON(item gjson.Result) bool {
-	if item.Get("type").String() != "function_call_output" || item.Get("namespace").String() != "agent" || item.Get("name").String() != "goal_objective" || item.Get("output").Type != gjson.String {
+func isCodexAgentContextOutputJSON(item gjson.Result) bool {
+	if item.Get("type").String() != "function_call_output" || item.Get("namespace").String() != "agent" || item.Get("name").Type != gjson.String || strings.TrimSpace(item.Get("name").String()) == "" || item.Get("output").Type != gjson.String {
 		return false
 	}
 	callID := item.Get("call_id")

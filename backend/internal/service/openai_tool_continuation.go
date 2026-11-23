@@ -75,7 +75,7 @@ func NeedsToolContinuation(reqBody map[string]any) bool {
 		if !ok {
 			continue
 		}
-		if isCodexGoalContextOutput(itemMap) {
+		if isCodexAgentContextOutput(itemMap) {
 			continue
 		}
 		itemType, _ := itemMap["type"].(string)
@@ -107,7 +107,7 @@ func AnalyzeToolContinuationSignals(reqBody map[string]any) ToolContinuationSign
 		if !ok {
 			continue
 		}
-		if isCodexGoalContextOutput(itemMap) {
+		if isCodexAgentContextOutput(itemMap) {
 			continue
 		}
 		itemType, _ := itemMap["type"].(string)
@@ -178,7 +178,7 @@ func ValidateFunctionCallOutputContextBytes(body []byte) FunctionCallOutputValid
 		if !item.IsObject() {
 			return true
 		}
-		if isCodexGoalContextOutputJSON(item) {
+		if isCodexAgentContextOutputJSON(item) {
 			return true
 		}
 		itemType := item.Get("type").String()
@@ -255,7 +255,7 @@ func AnalyzeToolCallOutputContextCoverageBytes(body []byte) ToolCallOutputContex
 		if !item.IsObject() {
 			return
 		}
-		if isCodexGoalContextOutputJSON(item) {
+		if isCodexAgentContextOutputJSON(item) {
 			return
 		}
 		itemType := item.Get("type").String()
@@ -332,7 +332,7 @@ func ValidateFunctionCallOutputContext(reqBody map[string]any) FunctionCallOutpu
 		if !ok {
 			continue
 		}
-		if isCodexGoalContextOutput(itemMap) {
+		if isCodexAgentContextOutput(itemMap) {
 			continue
 		}
 		itemType, _ := itemMap["type"].(string)
@@ -361,7 +361,7 @@ func ValidateFunctionCallOutputContext(reqBody map[string]any) FunctionCallOutpu
 		if !ok {
 			continue
 		}
-		if isCodexGoalContextOutput(itemMap) {
+		if isCodexAgentContextOutput(itemMap) {
 			continue
 		}
 		itemType, _ := itemMap["type"].(string)
