@@ -240,6 +240,7 @@ type CreateGroupRequest struct {
 	AllowLive                   bool                                      `json:"allow_live"`
 	ForceOpenAIFast             bool                                      `json:"force_openai_fast"`
 	OpenAIZeroInjection         bool                                      `json:"openai_zero_injection"`
+	ForceOpenAIUltrafast        bool                                      `json:"force_openai_ultrafast"`
 	FreeOpenAIFast              bool                                      `json:"free_openai_fast"`
 	RequireOAuthOnly            bool                                      `json:"require_oauth_only"`
 	RequirePrivacySet           bool                                      `json:"require_privacy_set"`
@@ -319,6 +320,7 @@ type UpdateGroupRequest struct {
 	AllowLive                   *bool                                      `json:"allow_live"`
 	ForceOpenAIFast             *bool                                      `json:"force_openai_fast"`
 	OpenAIZeroInjection         *bool                                      `json:"openai_zero_injection"`
+	ForceOpenAIUltrafast        *bool                                      `json:"force_openai_ultrafast"`
 	FreeOpenAIFast              *bool                                      `json:"free_openai_fast"`
 	RequireOAuthOnly            *bool                                      `json:"require_oauth_only"`
 	RequirePrivacySet           *bool                                      `json:"require_privacy_set"`
@@ -724,6 +726,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		AllowLive:                       req.AllowLive,
 		ForceOpenAIFast:                 req.ForceOpenAIFast,
 		OpenAIZeroInjection:             req.OpenAIZeroInjection,
+		ForceOpenAIUltrafast:            req.ForceOpenAIUltrafast,
 		FreeOpenAIFast:                  req.FreeOpenAIFast,
 		RequireOAuthOnly:                req.RequireOAuthOnly,
 		RequirePrivacySet:               req.RequirePrivacySet,
@@ -874,6 +877,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		AllowLive:                       req.AllowLive,
 		ForceOpenAIFast:                 req.ForceOpenAIFast,
 		OpenAIZeroInjection:             req.OpenAIZeroInjection,
+		ForceOpenAIUltrafast:            req.ForceOpenAIUltrafast,
 		FreeOpenAIFast:                  req.FreeOpenAIFast,
 		RequireOAuthOnly:                req.RequireOAuthOnly,
 		RequirePrivacySet:               req.RequirePrivacySet,

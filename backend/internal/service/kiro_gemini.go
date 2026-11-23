@@ -156,6 +156,7 @@ func (s *GatewayService) ForwardKiroGemini(ctx context.Context, c *gin.Context, 
 				case "refusal":
 					finish = "SAFETY"
 					result.KiroRefused = true
+					result.Usage = ClaudeUsage{}
 				}
 			}
 		case "message_stop":
