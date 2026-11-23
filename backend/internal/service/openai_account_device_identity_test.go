@@ -78,8 +78,8 @@ func TestAccountDeviceHeaderAndMetadataParity(t *testing.T) {
 	} {
 		var body map[string]any
 		require.NoError(t, json.Unmarshal([]byte(input), &body))
-		require.True(t, applyCodexAccountIdentityClientMetadataMap(body, a, 77))
-		raw, changed, err := applyCodexAccountIdentityClientMetadataRaw([]byte(input), a, 77)
+		require.True(t, applyCodexAccountIdentityClientMetadataMap(body, a, 77, ""))
+		raw, changed, err := applyCodexAccountIdentityClientMetadataRaw([]byte(input), a, 77, "")
 		require.NoError(t, err)
 		require.True(t, changed)
 		encoded, err := json.Marshal(body)
@@ -101,7 +101,7 @@ func TestAccountDeviceHeaderAndMetadataParity(t *testing.T) {
 	applyCodexAccountIdentityHeaders(h, a, 77)
 	require.Equal(t, want, h.Get("x-codex-installation-id"))
 	// Compact and other payloads without metadata retain their body shape.
-	raw, changed, err := applyCodexAccountIdentityClientMetadataRaw([]byte(`{"input":[]}`), a, 77)
+	raw, changed, err := applyCodexAccountIdentityClientMetadataRaw([]byte(`{"input":[]}`), a, 77, "")
 	require.NoError(t, err)
 	require.False(t, changed)
 	require.JSONEq(t, `{"input":[]}`, string(raw))

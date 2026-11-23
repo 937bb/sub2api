@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -130,19 +131,21 @@ func TestOpenAIResponsesOrphanPrecheckCompatibilityErrors(t *testing.T) {
 }
 
 func TestOpenAIResponsesOrphanPrecheckLargeEscapedContent(t *testing.T) {
-	// AllocsPerRun measures process-wide allocations. Service tests can leave
-	// cache janitors running, so measure this zero-allocation parser in a fresh
-	// process without weakening its zero-allocation requirement.
-	const childEnv = "SUB2API_ORPHAN_PRECHECK_ALLOC_CHILD"
+	// AllocsPerRun counts allocations across the process, including background
+	// goroutines left by other service tests. Measure only this case in a child.
+	const childEnv = "SUB2API_OPENAI_ORPHAN_ALLOC_TEST_CHILD"
 	if os.Getenv(childEnv) != "1" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestOpenAIResponsesOrphanPrecheckLargeEscapedContent$", "-test.count=1")
+		executable, err := os.Executable()
+		require.NoError(t, err)
+		cmd := exec.CommandContext(ctx, executable, "-test.run=^"+regexp.QuoteMeta(t.Name())+"$", "-test.count=1")
 		cmd.Env = append(os.Environ(), childEnv+"=1")
 		output, err := cmd.CombinedOutput()
-		require.NoError(t, err, "%s", output)
+		require.NoError(t, err, "isolated allocation test failed:\n%s", output)
 		return
 	}
+
 	body := []byte(`{"vendor":"` + strings.Repeat(`\n\"`, 1<<16) + `","input":[{"content":"` + strings.Repeat(`\n\"`, 1<<16) + `","type":"message"}]}`)
 	require.False(t, openAIResponsesInputMayNeedOrphanCleanup(body))
 	allocations := testing.AllocsPerRun(5, func() {

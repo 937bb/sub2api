@@ -34,7 +34,7 @@ func TestCodexCapturedTurnMetadataScopedWithoutRoutingChanges(t *testing.T) {
 	cm := map[string]any{"x-codex-turn-metadata": raw}
 	body, err := json.Marshal(map[string]any{"input": []any{map[string]any{"role": "assistant", "content": "old conversation"}}, "client_metadata": cm})
 	require.NoError(t, err)
-	rewritten, changed, err := applyCodexAccountIdentityClientMetadataRaw(body, account, 77)
+	rewritten, changed, err := applyCodexAccountIdentityClientMetadataRaw(body, account, 77, "")
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.JSONEq(t, metadata, gjson.GetBytes(rewritten, "client_metadata.x-codex-turn-metadata").String())

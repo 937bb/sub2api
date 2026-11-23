@@ -126,6 +126,8 @@ const (
 	FieldForceOpenaiFast = "force_openai_fast"
 	// FieldOpenaiZeroInjection holds the string denoting the openai_zero_injection field in the database.
 	FieldOpenaiZeroInjection = "openai_zero_injection"
+	// FieldForceOpenaiUltrafast holds the string denoting the force_openai_ultrafast field in the database.
+	FieldForceOpenaiUltrafast = "force_openai_ultrafast"
 	// FieldFreeOpenaiFast holds the string denoting the free_openai_fast field in the database.
 	FieldFreeOpenaiFast = "free_openai_fast"
 	// FieldRequireOauthOnly holds the string denoting the require_oauth_only field in the database.
@@ -286,6 +288,7 @@ var Columns = []string{
 	FieldAllowLive,
 	FieldForceOpenaiFast,
 	FieldOpenaiZeroInjection,
+	FieldForceOpenaiUltrafast,
 	FieldFreeOpenaiFast,
 	FieldRequireOauthOnly,
 	FieldRequirePrivacySet,
@@ -418,6 +421,8 @@ var (
 	DefaultForceOpenaiFast bool
 	// DefaultOpenaiZeroInjection holds the default value on creation for the "openai_zero_injection" field.
 	DefaultOpenaiZeroInjection bool
+	// DefaultForceOpenaiUltrafast holds the default value on creation for the "force_openai_ultrafast" field.
+	DefaultForceOpenaiUltrafast bool
 	// DefaultFreeOpenaiFast holds the default value on creation for the "free_openai_fast" field.
 	DefaultFreeOpenaiFast bool
 	// DefaultRequireOauthOnly holds the default value on creation for the "require_oauth_only" field.
@@ -712,6 +717,11 @@ func ByForceOpenaiFast(opts ...sql.OrderTermOption) OrderOption {
 // ByOpenaiZeroInjection orders the results by the openai_zero_injection field.
 func ByOpenaiZeroInjection(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldOpenaiZeroInjection, opts...).ToFunc()
+}
+
+// ByForceOpenaiUltrafast orders the results by the force_openai_ultrafast field.
+func ByForceOpenaiUltrafast(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldForceOpenaiUltrafast, opts...).ToFunc()
 }
 
 // ByFreeOpenaiFast orders the results by the free_openai_fast field.

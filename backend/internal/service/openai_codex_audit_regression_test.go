@@ -17,7 +17,7 @@ func TestCodexParentReferencesShareExistingThreadAndTurnNamespace(t *testing.T) 
 	body := []byte(`{"input":[],"client_metadata":{"parent_thread_id":"parent","x-codex-parent-thread-id":"parent","forked_from_thread_id":"parent","parent_turn_id":"turn","x-codex-turn-metadata":"{\"parent_thread_id\":\"parent\",\"parent_turn_id\":\"turn\",\"counter\":9007199254740993,\"analytics_enabled\":false}"}}`)
 	parent := scopeCodexAccountIdentityValue(account, 77, "thread", "parent")
 	turn := scopeCodexAccountIdentityValue(account, 77, "turn", "turn")
-	out, changed, err := applyCodexAccountIdentityClientMetadataRaw(body, account, 77)
+	out, changed, err := applyCodexAccountIdentityClientMetadataRaw(body, account, 77, "")
 	require.NoError(t, err)
 	require.True(t, changed)
 	for _, name := range []string{"parent_thread_id", "x-codex-parent-thread-id", "forked_from_thread_id"} {
@@ -31,11 +31,11 @@ func TestCodexParentReferencesShareExistingThreadAndTurnNamespace(t *testing.T) 
 	require.Equal(t, "false", gjson.Get(embedded, "analytics_enabled").Raw)
 	var decoded map[string]any
 	require.NoError(t, json.Unmarshal(body, &decoded))
-	require.True(t, applyCodexAccountIdentityClientMetadataMap(decoded, account, 77))
+	require.True(t, applyCodexAccountIdentityClientMetadataMap(decoded, account, 77, ""))
 	encoded, err := json.Marshal(decoded)
 	require.NoError(t, err)
 	require.JSONEq(t, string(out), string(encoded))
-	other, _, err := applyCodexAccountIdentityClientMetadataRaw(body, account, 78)
+	other, _, err := applyCodexAccountIdentityClientMetadataRaw(body, account, 78, "")
 	require.NoError(t, err)
 	require.NotEqual(t, parent, gjson.GetBytes(other, "client_metadata.parent_thread_id").String())
 	require.Contains(t, string(body), `"parent_thread_id":"parent"`)
@@ -69,7 +69,7 @@ func TestCodexMetadataPreservesExecutionAndAnalytics(t *testing.T) {
 		`{"client_metadata":{"thread_id":"fixture"}}`,
 		`{"client_metadata":{"thread_id":"fixture","analytics_enabled":false,"sandbox":"seatbelt","sandbox_mode":"read-only","thread_source":"user","turn_trigger":"user","request_kind":"turn","agent_name":"main","model":"gpt-6.1-sol","window_number":2,"context_window_id":"window","history_ingest_requested":true,"history_initialization":"startup","forked_from_ordinal_exclusive":4,"auto_review_enabled":true,"node_repl_auto_review_required":false,"node_repl_disabled":false,"token_provider":"chatgpt","guardian_credits_requested":3,"guardian_recorded_items":1,"mcp_attribution":{"server":"fixture"},"tool_namespaces_info":[{"name":"mcp"}],"code_mode_tool_names":["exec"],"workspaces":["/workspace"],"responses_api_metadata":{"trace_id":"real-inbound"},"traceparent":"00-0123456789abcdef0123456789abcdef-0123456789abcdef-01","tracestate":"vendor=value","baggage":"fixture=value"}}`,
 	} {
-		out, _, err := applyCodexAccountIdentityClientMetadataRaw([]byte(raw), account, 77)
+		out, _, err := applyCodexAccountIdentityClientMetadataRaw([]byte(raw), account, 77, "")
 		require.NoError(t, err)
 		for _, field := range []string{
 			"analytics_enabled", "sandbox", "sandbox_mode", "thread_source", "turn_trigger",

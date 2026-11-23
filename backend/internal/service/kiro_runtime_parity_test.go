@@ -104,7 +104,10 @@ func TestKiroRuntimeParityAcrossProtocols(t *testing.T) {
 					} else {
 						require.NoError(t, err)
 						require.NotNil(t, result)
-						require.Equal(t, tc.want, result.Usage)
+						want := tc.want
+						// Bridge decoding records explicit cache totals, including zero.
+						want.cacheCreationInputTokensPresent = protocol != "messages" && !tc.refused
+						require.Equal(t, want, result.Usage)
 						require.Equal(t, tc.refused, result.KiroRefused)
 						require.Equal(t, 200, rec.Code)
 						if tc.refused {

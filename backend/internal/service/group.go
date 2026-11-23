@@ -105,6 +105,7 @@ type Group struct {
 	AllowLive                   bool
 	ForceOpenAIFast             bool // 强制 OpenAI 网关请求使用 service_tier=priority
 	OpenAIZeroInjection         bool // 禁止追加 Sub2API 自生成的提示词，保留客户端原始提示
+	ForceOpenAIUltrafast        bool // 对支持 Ultrafast 的模型强制 service_tier=ultrafast，优先于 ForceOpenAIFast
 	FreeOpenAIFast              bool // OpenAI Fast 请求按 Standard 价格向用户计费
 	RequireOAuthOnly            bool // 仅允许非 apikey 类型账号关联（OpenAI/Antigravity/Anthropic/Gemini）
 	RequirePrivacySet           bool // 调度时仅允许 privacy 已成功设置的账号（OpenAI/Antigravity/Anthropic/Gemini）

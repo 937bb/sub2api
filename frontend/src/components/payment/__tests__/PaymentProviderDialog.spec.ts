@@ -88,6 +88,7 @@ function mountDialog(options: { editing?: ProviderInstance | null } = {}) {
           template: '<div><slot /><slot name="footer" /></div>',
         },
         Select: {
+          name: 'Select',
           props: ['modelValue', 'options', 'disabled'],
           template: '<div />',
         },
@@ -148,6 +149,191 @@ describe('PaymentProviderDialog Epusdt safety', () => {
     expect(payload.refund_enabled).toBe(false)
     expect(payload.allow_user_refund).toBe(false)
     expect(payload.config.notifyUrl).toBe(`${window.location.origin}/api/v1/payment/webhook/epusdt`)
+  })
+})
+
+describe('PaymentProviderDialog payment guide', () => {
+  it('shows no payment guide for providers without a flow guide', () => {
+    const wrapper = mountDialog()
+
+    expect(wrapper.text()).not.toContain(messages['admin.settings.payment.alipayGuideSummary'])
+    expect(wrapper.text()).not.toContain(messages['admin.settings.payment.wxpayGuideSummary'])
+    expect(wrapper.find('button[title="View payment guide"]').exists()).toBe(false)
+  })
+
+  it.each([
+    ['alipay', 'admin.settings.payment.alipayGuideSummary'],
+    ['wxpay', 'admin.settings.payment.wxpayGuideSummary'],
+    ['airwallex', 'admin.settings.payment.airwallexGuideSummary'],
+  ])('shows the payment guide summary for %s', async (providerKey, summaryKey) => {
+    const wrapper = mountDialog()
+
+    ;(wrapper.vm as unknown as { reset: (key: string) => void }).reset(providerKey)
+    await nextTick()
+
+    expect(wrapper.text()).toContain(messages[summaryKey])
+    expect(wrapper.find('button[title="View payment guide"]').exists()).toBe(true)
+  })
+
+  it('shows Airwallex webhook event and API version guidance with the webhook URL', async () => {
+    const wrapper = mountDialog()
+
+    ;(wrapper.vm as unknown as { reset: (key: string) => void }).reset('airwallex')
+    await nextTick()
+
+    expect(wrapper.text()).toContain(messages['admin.settings.payment.airwallexWebhookHint'])
+    expect(wrapper.text()).toContain('/api/v1/payment/webhook/airwallex')
+  })
+
+  it('shows Stripe webhook API version guidance with the integrated SDK version', async () => {
+    const wrapper = mountDialog()
+
+    ;(wrapper.vm as unknown as { reset: (key: string) => void }).reset('stripe')
+    await nextTick()
+
+    expect(wrapper.text()).toContain(messages['admin.settings.payment.stripeWebhookHint'])
+    expect(wrapper.text()).toContain(`Use Stripe API version ${STRIPE_SDK_API_VERSION}.`)
+    expect(wrapper.text()).toContain('/api/v1/payment/webhook/stripe')
+  })
+
+  it('emits an empty Airwallex accountId when the admin clears it', async () => {
+    const provider = providerFactory({
+      config: {
+        clientId: 'cid_123',
+        apiBase: 'https://api.airwallex.com/api/v1',
+        countryCode: 'CN',
+        currency: 'CNY',
+        accountId: 'acct_123',
+      },
+    })
+    const wrapper = mountDialog({ editing: provider })
+
+    ;(wrapper.vm as unknown as { loadProvider: (provider: ProviderInstance) => void }).loadProvider(provider)
+    await nextTick()
+
+    const accountIdInput = wrapper
+      .findAll('input[type="text"]')
+      .find(input => (input.element as HTMLInputElement).value === 'acct_123')
+    if (!accountIdInput) throw new Error('accountId input not found')
+
+    await accountIdInput.setValue('')
+    await wrapper.find('form').trigger('submit.prevent')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string> }
+    expect(payload.config.accountId).toBe('')
+  })
+
+  it.each(['epay', 'usdt.trc20'])('serializes EasyPay upstream type %s and adds the local type to supported_types', async (upstreamType) => {
+    const provider = providerFactory({
+      provider_key: 'easypay',
+      name: 'EasyPay',
+      config: {
+        pid: 'pid-1',
+        apiBase: 'https://pay.example.com',
+        notifyUrl: 'https://example.com/api/v1/payment/webhook/easypay',
+        returnUrl: 'https://example.com/payment/result',
+      },
+      supported_types: ['alipay', 'wxpay'],
+      payment_mode: 'qrcode',
+    })
+    const wrapper = mountDialog({ editing: provider })
+
+    ;(wrapper.vm as unknown as { loadProvider: (provider: ProviderInstance) => void }).loadProvider(provider)
+    await nextTick()
+
+    await wrapper.find('button.btn-sm').trigger('click')
+    await nextTick()
+
+    const inputs = wrapper.findAll('input[type="text"]')
+    const customTypeInputs = inputs.filter(input => (input.element as HTMLInputElement).placeholder === 'credit_card')
+    const ldcTypeInput = customTypeInputs[0]
+    const upstreamTypeInput = customTypeInputs[1]
+    const displayNameInput = inputs.find(input => (input.element as HTMLInputElement).placeholder === '信用卡')
+    if (!ldcTypeInput || !upstreamTypeInput || !displayNameInput) {
+      throw new Error('custom method inputs not found')
+    }
+
+    await ldcTypeInput.setValue('ldc')
+    await upstreamTypeInput.setValue(upstreamType)
+    await displayNameInput.setValue('LDC')
+    await wrapper.find('form').trigger('submit.prevent')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as {
+      config: Record<string, string>
+      supported_types: string[]
+    }
+    expect(JSON.parse(payload.config.customMethods)).toEqual([{ type: 'ldc', upstreamType, displayName: 'LDC' }])
+    expect(payload.supported_types).toEqual(['alipay', 'wxpay', 'ldc'])
+  })
+
+  it.each([
+    ['alipay_hk', 'hkpay'],
+    ['usdt.trc20', 'usdt.trc20'],
+    ['usdt_trc20', 'usdt/trc20'],
+  ])('rejects invalid EasyPay mapping %s to %s', async (type, upstreamType) => {
+    const provider = providerFactory({
+      provider_key: 'easypay',
+      name: 'EasyPay',
+      config: {
+        pid: 'pid-1',
+        apiBase: 'https://pay.example.com',
+        notifyUrl: 'https://example.com/api/v1/payment/webhook/easypay',
+        returnUrl: 'https://example.com/payment/result',
+      },
+      supported_types: ['alipay', 'wxpay'],
+      payment_mode: 'qrcode',
+    })
+    const wrapper = mountDialog({ editing: provider })
+
+    ;(wrapper.vm as unknown as { loadProvider: (provider: ProviderInstance) => void }).loadProvider(provider)
+    await nextTick()
+
+    await wrapper.find('button.btn-sm').trigger('click')
+    await nextTick()
+
+    const inputs = wrapper.findAll('input[type="text"]')
+    const customTypeInputs = inputs.filter(input => (input.element as HTMLInputElement).placeholder === 'credit_card')
+    const typeInput = customTypeInputs[0]
+    const upstreamTypeInput = customTypeInputs[1]
+    const displayNameInput = inputs.find(input => (input.element as HTMLInputElement).placeholder === '信用卡')
+    if (!typeInput || !upstreamTypeInput || !displayNameInput) {
+      throw new Error('custom method inputs not found')
+    }
+
+    await typeInput.setValue(type)
+    await upstreamTypeInput.setValue(upstreamType)
+    await displayNameInput.setValue('Custom payment')
+    await wrapper.find('form').trigger('submit.prevent')
+
+    expect(wrapper.emitted('save')).toBeUndefined()
+  })
+})
+
+describe('PaymentProviderDialog EasyPay refund protocol', () => {
+  it.each([undefined, '1', '0'])('loads and saves the refund success code %s', async (storedCode) => {
+    const provider = providerFactory({
+      provider_key: 'easypay', name: 'EasyPay', supported_types: ['alipay'],
+      config: {
+        pid: 'pid-1', apiBase: 'https://pay.example.com',
+        ...(storedCode === undefined ? {} : { refundSuccessCode: storedCode }),
+      },
+    })
+    const wrapper = mountDialog({ editing: provider })
+    ;(wrapper.vm as unknown as { loadProvider: (provider: ProviderInstance) => void }).loadProvider(provider)
+    await nextTick()
+
+    const selector = wrapper.findAllComponents({ name: 'Select' }).find(select =>
+      select.props('options').some((option: { value: string }) => option.value === '0'),
+    )
+    expect(selector, 'refund success code selector').toBeDefined()
+    expect(selector!.props('modelValue')).toBe(storedCode ?? '1')
+    const selectedCode = storedCode === '0' ? '1' : '0'
+    selector!.vm.$emit('update:modelValue', selectedCode)
+    await wrapper.find('form').trigger('submit')
+
+    const payload = wrapper.emitted('save')?.[0]?.[0] as { config: Record<string, string> }
+    expect(payload.config.refundSuccessCode).toBe(selectedCode)
+    wrapper.unmount()
   })
 })
 
