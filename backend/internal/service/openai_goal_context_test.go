@@ -1,0 +1,116 @@
+package service
+
+import (
+	"encoding/json"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
+)
+
+func TestGoalContextRecognition(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		patch map[string]any
+		want  bool
+	}{
+		{"missing_call_id", nil, true},
+		{"null_call_id", map[string]any{"call_id": nil}, true},
+		{"empty_call_id", map[string]any{"call_id": ""}, true},
+		{"blank_call_id", map[string]any{"call_id": " "}, true},
+		{"real_call_id", map[string]any{"call_id": "call_goal"}, false},
+		{"numeric_call_id", map[string]any{"call_id": 0}, false},
+		{"boolean_call_id", map[string]any{"call_id": false}, false},
+		{"object_call_id", map[string]any{"call_id": map[string]any{}}, false},
+		{"wrong_namespace", map[string]any{"namespace": "functions"}, false},
+		{"missing_namespace", map[string]any{"namespace": nil}, false},
+		{"other_agent_tool", map[string]any{"name": "other_tool"}, false},
+		{"wrong_type", map[string]any{"type": "custom_tool_call_output"}, false},
+		{"null_output", map[string]any{"output": nil}, false},
+		{"structured_output", map[string]any{"output": []any{}}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			item := map[string]any{"type": "function_call_output", "namespace": "agent", "name": "goal_objective", "output": "Continue the original objective."}
+			for k, v := range tt.patch {
+				item[k] = v
+			}
+			raw, err := json.Marshal(item)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, isCodexGoalContextOutput(item))
+			require.Equal(t, tt.want, isCodexGoalContextOutputJSON(gjson.ParseBytes(raw)))
+			if !tt.want {
+				return
+			}
+			req := map[string]any{"input": []any{item}}
+			body, err := json.Marshal(req)
+			require.NoError(t, err)
+			require.False(t, NeedsToolContinuation(req))
+			require.Empty(t, AnalyzeToolContinuationSignals(req))
+			require.Empty(t, ValidateFunctionCallOutputContext(req))
+			require.Empty(t, ValidateFunctionCallOutputContextBytes(body))
+			require.Empty(t, AnalyzeToolCallOutputContextCoverageBytes(body))
+			require.False(t, openAIWSRawItemsHasFunctionCallOutput([]json.RawMessage{raw}))
+			require.False(t, openAIWSRawPayloadHasToolCallOutput(body))
+			objectBody, err := json.Marshal(map[string]any{"input": item})
+			require.NoError(t, err)
+			require.False(t, openAIWSRawPayloadHasToolCallOutput(objectBody))
+		})
+	}
+}
+
+func TestGoalContextMixedToolOutputs(t *testing.T) {
+	goal := map[string]any{"type": "function_call_output", "namespace": "agent", "name": "goal_objective", "output": "Continue", "call_id": nil}
+	for _, tt := range []struct {
+		name             string
+		items            []any
+		missing, covered bool
+	}{
+		{"ordinary_missing_id", []any{map[string]any{"type": "function_call_output", "output": "bad"}}, true, false},
+		{"ordinary_unreferenced", []any{map[string]any{"type": "function_call_output", "call_id": "call_a", "output": "result"}}, false, false},
+		{"ordinary_referenced", []any{map[string]any{"type": "item_reference", "id": "call_a"}, map[string]any{"type": "function_call_output", "call_id": "call_a", "output": "result"}}, false, true},
+		{"ordinary_paired", []any{map[string]any{"type": "function_call", "call_id": "call_a", "name": "lookup", "arguments": "{}"}, map[string]any{"type": "function_call_output", "call_id": "call_a", "output": "result"}}, false, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, goalFirst := range []bool{false, true} {
+				input := append([]any{}, tt.items...)
+				if goalFirst {
+					input = append([]any{goal}, input...)
+				} else {
+					input = append(input, goal)
+				}
+				req := map[string]any{"input": input}
+				body, err := json.Marshal(req)
+				require.NoError(t, err)
+				require.True(t, NeedsToolContinuation(req))
+				signals := AnalyzeToolContinuationSignals(req)
+				require.True(t, signals.HasFunctionCallOutput)
+				require.Equal(t, tt.missing, signals.HasFunctionCallOutputMissingCallID)
+				validation := ValidateFunctionCallOutputContextBytes(body)
+				require.Equal(t, ValidateFunctionCallOutputContext(req), validation)
+				require.Equal(t, tt.missing, validation.HasFunctionCallOutputMissingCallID)
+				coverage := AnalyzeToolCallOutputContextCoverageBytes(body)
+				require.True(t, coverage.HasFunctionCallOutput)
+				require.Equal(t, tt.covered, coverage.ContextCoversAllCallIDs)
+				var items []json.RawMessage
+				require.NoError(t, json.Unmarshal([]byte(gjson.GetBytes(body, "input").Raw), &items))
+				require.True(t, openAIWSRawItemsHasFunctionCallOutput(items))
+				require.True(t, openAIWSRawPayloadHasToolCallOutput(body))
+				require.Equal(t, tt.name == "ordinary_paired", openAIWSRawItemsHaveToolCallContextForOutputs(items))
+			}
+		})
+	}
+}
+
+func TestWebSocketCompatibilityPreservesGoalContext(t *testing.T) {
+	for _, suffix := range []string{"", ",\"call_id\":null", ",\"call_id\":\"\""} {
+		body := []byte(`{"type":"response.create","model":"gpt-5.5","input":[{"type":"function_call_output","namespace":"agent","name":"goal_objective","output":"Continue the original goal."` + suffix + `}]}`)
+		account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+		normalized, _, err := normalizeOpenAIResponsesWebSocketCompatibilityBody(body, account, false)
+		require.NoError(t, err)
+		require.JSONEq(t, gjson.GetBytes(body, "input").Raw, gjson.GetBytes(normalized, "input").Raw)
+		again, changed, err := normalizeOpenAIResponsesWebSocketCompatibilityBody(normalized, account, false)
+		require.NoError(t, err)
+		require.False(t, changed)
+		require.JSONEq(t, string(normalized), string(again))
+	}
+}
