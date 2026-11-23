@@ -114,3 +114,17 @@ func TestWebSocketCompatibilityPreservesGoalContext(t *testing.T) {
 		require.JSONEq(t, string(normalized), string(again))
 	}
 }
+
+func TestHTTPNamespaceCleanupPreservesGoalContext(t *testing.T) {
+	for _, keepToolCalls := range []bool{false, true} {
+		body := []byte(`{"input":[{"type":"function_call_output","namespace":"agent","name":"goal_objective","output":"Continue","call_id":null},{"type":"message","role":"user","namespace":"obsolete","content":"Continue"}]}`)
+		normalized, err := stripOpenAIResponsesInputNamespaces(body, keepToolCalls)
+		require.NoError(t, err)
+		require.JSONEq(t, gjson.GetBytes(body, "input.0").Raw, gjson.GetBytes(normalized, "input.0").Raw)
+		require.False(t, gjson.GetBytes(normalized, "input.1.namespace").Exists())
+		require.False(t, ValidateFunctionCallOutputContextBytes(normalized).HasFunctionCallOutput)
+		again, err := stripOpenAIResponsesInputNamespaces(normalized, keepToolCalls)
+		require.NoError(t, err)
+		require.Equal(t, normalized, again)
+	}
+}

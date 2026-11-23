@@ -208,6 +208,7 @@ func stripOpenAIResponsesInputNamespaces(body []byte, keepToolCallNamespaces boo
 	var stripErr error
 	input.ForEach(func(_, item gjson.Result) bool {
 		if !item.IsObject() || !item.Get("namespace").Exists() ||
+			isCodexGoalContextOutputJSON(item) ||
 			(keepToolCallNamespaces && isOpenAIResponsesToolCallItemType(item.Get("type").String())) {
 			return true
 		}
