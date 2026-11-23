@@ -24,7 +24,13 @@ func TestGoalContextRecognition(t *testing.T) {
 		{"object_call_id", map[string]any{"call_id": map[string]any{}}, false},
 		{"wrong_namespace", map[string]any{"namespace": "functions"}, false},
 		{"missing_namespace", map[string]any{"namespace": nil}, false},
-		{"other_agent_tool", map[string]any{"name": "other_tool"}, false},
+		{"dynamic_context_name", map[string]any{"name": "browser_info"}, true},
+		{"browser_page", map[string]any{"name": "codex_apps_open_page"}, true},
+		{"browser_selection", map[string]any{"name": "codex_apps_selected_page_part_1_of_1"}, true},
+		{"future_context_name", map[string]any{"name": "future_context"}, true},
+		{"null_name", map[string]any{"name": nil}, false},
+		{"blank_name", map[string]any{"name": " "}, false},
+		{"numeric_name", map[string]any{"name": 42}, false},
 		{"wrong_type", map[string]any{"type": "custom_tool_call_output"}, false},
 		{"null_output", map[string]any{"output": nil}, false},
 		{"structured_output", map[string]any{"output": []any{}}, false},
@@ -36,8 +42,8 @@ func TestGoalContextRecognition(t *testing.T) {
 			}
 			raw, err := json.Marshal(item)
 			require.NoError(t, err)
-			require.Equal(t, tt.want, isCodexGoalContextOutput(item))
-			require.Equal(t, tt.want, isCodexGoalContextOutputJSON(gjson.ParseBytes(raw)))
+			require.Equal(t, tt.want, isCodexAgentContextOutput(item))
+			require.Equal(t, tt.want, isCodexAgentContextOutputJSON(gjson.ParseBytes(raw)))
 			if !tt.want {
 				return
 			}
@@ -126,5 +132,46 @@ func TestHTTPNamespaceCleanupPreservesGoalContext(t *testing.T) {
 		again, err := stripOpenAIResponsesInputNamespaces(normalized, keepToolCalls)
 		require.NoError(t, err)
 		require.Equal(t, normalized, again)
+	}
+}
+
+func TestAgentContextSurvivesHTTPAndWebSocketHops(t *testing.T) {
+	for _, name := range []string{"goal_objective", "codex_apps_open_page", "codex_apps_selected_page_part_1_of_1", "browser_info", "future_context"} {
+		t.Run(name, func(t *testing.T) {
+			contextItem := map[string]any{"type": "function_call_output", "namespace": "agent", "name": name, "output": "Context"}
+			body, err := json.Marshal(map[string]any{"model": "gpt-6-astra", "input": []any{
+				contextItem, map[string]any{"type": "message", "role": "user", "namespace": "obsolete", "content": "Continue"},
+			}})
+			require.NoError(t, err)
+			original := gjson.GetBytes(body, "input.0").Raw
+			for _, keepCalls := range []bool{false, true} {
+				forwarded := body
+				for hop := 0; hop < 2; hop++ {
+					forwarded, err = stripOpenAIResponsesInputNamespaces(forwarded, keepCalls)
+					require.NoError(t, err)
+					require.JSONEq(t, original, gjson.GetBytes(forwarded, "input.0").Raw)
+					require.Empty(t, ValidateFunctionCallOutputContextBytes(forwarded))
+					require.False(t, gjson.GetBytes(forwarded, "input.1.namespace").Exists())
+				}
+			}
+			account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+			forwarded, _, err := normalizeOpenAIResponsesWebSocketCompatibilityBody(body, account, false)
+			require.NoError(t, err)
+			require.JSONEq(t, original, gjson.GetBytes(forwarded, "input.0").Raw)
+			require.False(t, openAIWSRawPayloadHasToolCallOutput(forwarded))
+
+			for _, paired := range []bool{false, true} {
+				ordinary := map[string]any{"type": "function_call_output", "output": "result"}
+				if paired {
+					ordinary["call_id"] = "call_real"
+				}
+				mixed, err := json.Marshal(map[string]any{"input": []any{contextItem, ordinary}})
+				require.NoError(t, err)
+				validation := ValidateFunctionCallOutputContextBytes(mixed)
+				require.True(t, validation.HasFunctionCallOutput)
+				require.Equal(t, !paired, validation.HasFunctionCallOutputMissingCallID)
+				require.False(t, validation.HasItemReferenceForAllCallIDs)
+			}
+		})
 	}
 }
