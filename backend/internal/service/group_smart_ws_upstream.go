@@ -43,6 +43,10 @@ func finishGroupSmartWSAttempt(attempt *groupSmartWSAttempt, err error) error {
 	sentErr := &PluginTransportError{Code: "SMART_WS_REQUEST_SENT",
 		Message: smartWSDispatchedMessage("WS upstream attempt ended after dispatch; automatic replay is disabled", err), RequestSent: true,
 		TerminalResponse: OpenAIForwardErrorIsTerminal(err)}
+	var failover *UpstreamFailoverError
+	if errors.As(err, &failover) && failover.StatusCode == http.StatusTooManyRequests {
+		sentErr.RateLimited = true
+	}
 	return sentErr
 }
 

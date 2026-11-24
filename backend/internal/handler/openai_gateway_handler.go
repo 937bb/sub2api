@@ -996,7 +996,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				upstreamErrorAlreadyCommunicated := openAIForwardErrorAlreadyCommunicated(c, writerSizeBeforeForward, err)
 				wroteFallback := false
 				if !upstreamErrorAlreadyCommunicated {
-					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted)
+					wroteFallback = h.ensureForwardErrorResponse(c, streamStarted, err)
 				}
 				fields := []zap.Field{
 					zap.Int64("account_id", account.ID),
@@ -3933,8 +3933,9 @@ func (h *OpenAIGatewayHandler) ensureOpenAIStreamReadErrorResponse(c *gin.Contex
 	return true
 }
 
-// ensureForwardErrorResponse 在 Forward 返回错误但尚未写响应时补写统一错误响应。
-func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarted bool) bool {
+// ensureForwardErrorResponse writes a fallback only when forwarding did not
+// already deliver an error. A dispatched WS rate limit remains non-replayable.
+func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, streamStarted bool, forwardErrors ...error) bool {
 	if c == nil || c.Writer == nil {
 		return false
 	}
@@ -3942,7 +3943,7 @@ func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, stream
 		failoverClientGone(c)
 		return false
 	}
-	// 先停 compact 心跳再读 Writer 状态，避免与心跳 goroutine 竞争。
+	// Stop heartbeat writers before inspecting their response state.
 	compactKeepaliveCommitted := service.StopOpenAICompactSSEKeepaliveCommitted(c)
 	if compactKeepaliveCommitted {
 		streamStarted = true
@@ -3965,6 +3966,13 @@ func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, stream
 	}
 	if c.Writer.Written() && !imageKeepalivePaddingOnly {
 		streamStarted = true
+	}
+	if len(forwardErrors) > 0 {
+		var transport *service.PluginTransportError
+		if errors.As(forwardErrors[0], &transport) && transport.RequestSent && transport.RateLimited {
+			h.handleStreamingAwareErrorWithCode(c, http.StatusTooManyRequests, "rate_limit_error", "rate_limit_exceeded", "Upstream rate limit exceeded, please retry later", streamStarted, false)
+			return true
+		}
 	}
 	h.handleStreamingAwareError(c, http.StatusBadGateway, "upstream_error", "Upstream request failed", streamStarted)
 	return true

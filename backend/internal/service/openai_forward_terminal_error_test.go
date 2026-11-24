@@ -35,6 +35,9 @@ func TestSmartWSTerminalErrorSurvivesWrappingWithoutReplay(t *testing.T) {
 		require.False(t, OpenAIForwardErrorIsTerminal(err))
 		var failover *UpstreamFailoverError
 		require.False(t, errors.As(err, &failover))
+		var transport *PluginTransportError
+		require.ErrorAs(t, err, &transport)
+		require.Equal(t, cause.Error() == "upstream error: 429 (failover)", transport.RateLimited)
 	}
 	require.False(t, OpenAIForwardErrorIsTerminal(nil))
 }

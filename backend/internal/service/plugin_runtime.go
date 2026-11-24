@@ -362,6 +362,9 @@ type PluginTransportError struct {
 	// dispatched request into a retryable failover. Callers must also verify
 	// that a semantic response was written before suppressing their fallback.
 	TerminalResponse bool
+	// RateLimited retains an explicit upstream 429 without exposing the
+	// dispatched request as a retryable UpstreamFailoverError.
+	RateLimited bool
 }
 
 func (e *PluginTransportError) Error() string {
