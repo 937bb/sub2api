@@ -1301,12 +1301,15 @@ func openAIStreamDataStartsTTFT(data, eventType string, forceOutput bool, mode s
 	return forceOutput || openAIStreamDataStartsSemanticTTFT(data, eventType)
 }
 
-// openAIStreamFailedEventErrorCode 提取流内 failed 事件的错误码（小写），
-// 兼容 response.failed 的嵌套形态与裸 error 形态。
+// openAIStreamFailedEventErrorCode accepts nested response.failed errors and
+// top-level error events, returning a lowercase error code.
 func openAIStreamFailedEventErrorCode(payload []byte) string {
 	code := strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "response.error.code").String()))
 	if code == "" {
 		code = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "error.code").String()))
+	}
+	if code == "" && gjson.GetBytes(payload, "type").String() == "error" {
+		code = strings.ToLower(strings.TrimSpace(gjson.GetBytes(payload, "code").String()))
 	}
 	return code
 }
@@ -1419,7 +1422,7 @@ func openAIStreamFailedEventSemanticStatus(payload []byte, message string) int {
 	switch {
 	case strings.Contains(combined, "rate_limit"):
 		return http.StatusTooManyRequests
-	case strings.Contains(combined, "invalid_request") ||
+	case code == "invalid_value" || strings.Contains(combined, "invalid_request") ||
 		strings.Contains(combined, "content_policy") ||
 		strings.Contains(combined, "policy_violation") ||
 		strings.Contains(combined, "safety_violation"):

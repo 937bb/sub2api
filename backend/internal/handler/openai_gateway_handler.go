@@ -3995,31 +3995,21 @@ func openAIForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForwa
 	if err == nil || c == nil || c.Writer == nil {
 		return false
 	}
-	// 与快照同口径：排除 compact 心跳字节，避免"仅心跳写出"被误判为
-	// 响应已写出（#3887）。
+	// Exclude heartbeat bytes, matching the snapshot, so a heartbeat alone
+	// cannot count as a semantic response (#3887).
 	if service.OpenAICompactKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward ||
 		service.OpenAIImagesJSONKeepaliveAdjustedWrittenSize(c) == writerSizeBeforeForward {
 		return false
 	}
 
-	// cyber_policy 命中时上游原始错误体已透传给客户端（非流式 c.Data 写出 400 body，
-	// 流式写出 response.failed 事件），不能再让 ensureForwardErrorResponse 追加
-	// fallback —— 否则在已写出的完整响应尾部追加 SSE（responses 端点尾随
-	// response.failed、chat 端点尾随 event:error），污染响应体。Size 已变化证明响应确已写出。
+	// Cyber-policy errors already forwarded their JSON body or response.failed
+	// event. The size change proves a response was written; appending another
+	// fallback would corrupt JSON or duplicate the terminal SSE event.
 	if service.GetOpsCyberPolicy(c) != nil {
 		return true
 	}
 
-	msg := strings.TrimSpace(err.Error())
-	for _, prefix := range []string{
-		"upstream response failed:",
-		"non-streaming openai protocol error:",
-	} {
-		if strings.HasPrefix(msg, prefix) {
-			return true
-		}
-	}
-	return false
+	return service.OpenAIForwardErrorIsTerminal(err)
 }
 
 func openAIForwardMayFailover(c *gin.Context, writerSizeBeforeForward int, failoverErr *service.UpstreamFailoverError) bool {

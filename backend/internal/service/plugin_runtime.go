@@ -358,6 +358,10 @@ type PluginTransportError struct {
 	Code        string
 	Message     string
 	RequestSent bool
+	// TerminalResponse preserves the upstream error class without unwrapping a
+	// dispatched request into a retryable failover. Callers must also verify
+	// that a semantic response was written before suppressing their fallback.
+	TerminalResponse bool
 }
 
 func (e *PluginTransportError) Error() string {

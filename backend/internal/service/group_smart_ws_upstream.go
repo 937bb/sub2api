@@ -41,7 +41,8 @@ func finishGroupSmartWSAttempt(attempt *groupSmartWSAttempt, err error) error {
 	}
 	// Core's normal early-stream failover policy must not replay a WS generation.
 	sentErr := &PluginTransportError{Code: "SMART_WS_REQUEST_SENT",
-		Message: smartWSDispatchedMessage("WS upstream attempt ended after dispatch; automatic replay is disabled", err), RequestSent: true}
+		Message: smartWSDispatchedMessage("WS upstream attempt ended after dispatch; automatic replay is disabled", err), RequestSent: true,
+		TerminalResponse: OpenAIForwardErrorIsTerminal(err)}
 	return sentErr
 }
 

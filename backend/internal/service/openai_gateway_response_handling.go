@@ -2082,20 +2082,30 @@ func (s *OpenAIGatewayService) writeOpenAINonStreamingProtocolError(resp *http.R
 		statusCode, errType = http.StatusBadRequest, "invalid_request_error"
 	}
 	setOpsUpstreamError(c, statusCode, message, "")
-	// body-signal compact 心跳可能已把响应头提交为 200，此时只能以
-	// response.failed 终止事件回传错误，不能再写 JSON+状态码。
+	// A compact heartbeat may have committed HTTP 200. In that case, finish
+	// the existing stream with response.failed instead of appending JSON.
 	if openAICompactClientWantsStream(c) && StopOpenAICompactSSEKeepaliveCommitted(c) {
 		writeOpenAICompactSSEFailureMessage(c, statusCode, errType, message)
 		return fmt.Errorf("non-streaming openai protocol error: %s", message)
 	}
 	responseheaders.WriteFilteredHeaders(c.Writer.Header(), resp.Header, s.responseHeaderFilter)
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.JSON(statusCode, gin.H{
-		"error": gin.H{
-			"type":    errType,
-			"message": message,
-		},
-	})
+	if statusCode == http.StatusBadRequest {
+		// Preserve the field path and error code so clients can correct the
+		// rejected input instead of retrying a generic transport failure.
+		structured := payload
+		if detail := gjson.GetBytes(payload, "response.error"); detail.IsObject() {
+			structured = []byte(`{"error":` + detail.Raw + `}`)
+		} else if gjson.GetBytes(payload, "type").String() == "error" && !gjson.GetBytes(payload, "error").IsObject() {
+			if normalized, err := sjson.SetBytes(payload, "type", errType); err == nil {
+				structured = []byte(`{"error":` + string(normalized) + `}`)
+			}
+		}
+		writeOpenAIUpstreamClientError(c, statusCode, structured, message)
+	} else {
+		c.JSON(statusCode, gin.H{"error": gin.H{"type": errType, "message": message}})
+	}
+	MarkResponseCommitted(c)
 	return fmt.Errorf("non-streaming openai protocol error: %s", message)
 }
 
