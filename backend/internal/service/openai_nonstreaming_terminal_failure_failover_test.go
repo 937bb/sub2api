@@ -105,27 +105,31 @@ func TestNonStreamingSSEToJSON_UnclassifiedFailedEventFailsOver(t *testing.T) {
 	require.Empty(t, rec.Body.String())
 }
 
-// response.failed 中明确不可重试的请求错误应保留真实 400，不能伪装成网关 502。
+// Deterministic request failures retain HTTP 400 and the upstream error type.
 func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t *testing.T) {
 	cases := []struct {
-		name    string
-		data    string
-		wantMsg string
+		name     string
+		data     string
+		wantMsg  string
+		wantType string
 	}{
 		{
-			name:    "invalid_request",
-			data:    `{"type":"response.failed","error":{"type":"invalid_request_error","code":"invalid_request","message":"unknown parameter foo"}}`,
-			wantMsg: "unknown parameter foo",
+			name:     "invalid_request",
+			data:     `{"type":"response.failed","error":{"type":"invalid_request_error","code":"invalid_request","message":"unknown parameter foo"}}`,
+			wantMsg:  "unknown parameter foo",
+			wantType: "invalid_request_error",
 		},
 		{
-			name:    "context_window",
-			data:    `{"type":"response.failed","response":{"id":"resp_failed","status":"failed","output":[],"error":{"code":"upstream_error","message":"input exceeds the context window"}}}`,
-			wantMsg: "input exceeds the context window",
+			name:     "context_window",
+			data:     `{"type":"response.failed","response":{"id":"resp_failed","status":"failed","output":[],"error":{"code":"upstream_error","message":"input exceeds the context window"}}}`,
+			wantMsg:  "input exceeds the context window",
+			wantType: "invalid_request_error",
 		},
 		{
-			name:    "content_policy",
-			data:    `{"type":"response.failed","error":{"type":"content_policy_violation","message":"blocked by our content policy"}}`,
-			wantMsg: "blocked by our content policy",
+			name:     "content_policy",
+			data:     `{"type":"response.failed","error":{"type":"content_policy_violation","message":"blocked by our content policy"}}`,
+			wantMsg:  "blocked by our content policy",
+			wantType: "content_policy_violation",
 		},
 	}
 
@@ -143,7 +147,7 @@ func TestNonStreamingSSEToJSON_NonRetryableFailedEventStillWritesProtocolError(t
 			require.False(t, errors.As(err, &failoverErr), "不可重试的上游错误不得换号")
 			require.Equal(t, http.StatusBadRequest, rec.Code)
 			require.Contains(t, rec.Body.String(), tc.wantMsg)
-			require.Contains(t, rec.Body.String(), `"type":"invalid_request_error"`)
+			require.Contains(t, rec.Body.String(), `"type":"`+tc.wantType+`"`)
 			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 		})
 	}
