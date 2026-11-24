@@ -79,3 +79,20 @@ func TestTopLevelStreamErrorStatusPreservesFailureClass(t *testing.T) {
 		})
 	}
 }
+
+func TestSynthesizedFailedEventPreservesInputDetails(t *testing.T) {
+	for _, source := range []string{
+		`{"type":"error","error":{"type":"invalid_request_error","code":"invalid_value","param":"input[0].content[1].file_data","message":"unsupported MIME type image/mpo"}}`,
+		`{"type":"error","code":"invalid_value","param":"input[0].content[1].file_data","message":"unsupported MIME type image/mpo"}`,
+	} {
+		sse := buildOpenAIResponseFailedSSE("resp_test", "model", 1, []byte(source), "")
+		payloads := sseDataPayloads(sse)
+		require.Len(t, payloads, 1)
+		ws := buildOpenAIWSHTTPBridgeFailedEvent("resp_test", "model", 1, []byte(source), "")
+		for _, payload := range []string{payloads[0], string(ws)} {
+			require.Equal(t, "invalid_value", gjson.Get(payload, "response.error.code").String())
+			require.Equal(t, "input[0].content[1].file_data", gjson.Get(payload, "response.error.param").String())
+			require.Contains(t, gjson.Get(payload, "response.error.message").String(), "image/mpo")
+		}
+	}
+}

@@ -212,12 +212,15 @@ func (b *eventBody) Read(destination []byte) (int, error) {
 		encoded.WriteString("event: ")
 		encoded.WriteString(event.Type)
 		encoded.WriteByte('\n')
-		for _, line := range bytes.Split(next.data, []byte{'\n'}) {
-			encoded.WriteString("data: ")
-			encoded.Write(line)
-			encoded.WriteByte('\n')
+		// Downstream Responses processors consume one JSON document per data
+		// line. Keep a pretty-printed WS message intact without changing values.
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, next.data); err != nil {
+			return b.failure("invalid upstream JSON event")
 		}
-		encoded.WriteByte('\n')
+		encoded.WriteString("data: ")
+		encoded.Write(compact.Bytes())
+		encoded.WriteString("\n\n")
 		b.mu.Lock()
 		if b.closed {
 			b.mu.Unlock()

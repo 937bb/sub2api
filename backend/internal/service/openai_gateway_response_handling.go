@@ -1967,6 +1967,9 @@ func buildOpenAIResponseFailedSSE(responseID, model string, createdAt int64, sou
 		code = strings.TrimSpace(gjson.GetBytes(source, "response.error.code").String())
 	}
 	if code == "" {
+		code = openAIStreamFailedEventErrorCode(source)
+	}
+	if code == "" {
 		code = "upstream_error"
 	}
 	message := extractOpenAISSEErrorMessage(source)
@@ -1977,6 +1980,12 @@ func buildOpenAIResponseFailedSSE(responseID, model string, createdAt int64, sou
 		message = "Upstream response failed"
 	}
 	errorBody := gin.H{"code": code, "message": message}
+	for _, path := range []string{"error.param", "response.error.param", "param"} {
+		if param := gjson.GetBytes(source, path).String(); param != "" {
+			errorBody["param"] = param
+			break
+		}
+	}
 	if errorType != "" {
 		errorBody["type"] = errorType
 	}
