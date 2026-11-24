@@ -142,6 +142,7 @@
             <span v-else>{{ t('auth.resendCode') }}</span>
           </button>
         </div>
+        <RegistrationEmailHelp :contact-info="contactInfo" />
       </form>
     </div>
 
@@ -159,6 +160,7 @@
 </template>
 
 <script setup lang="ts">
+import RegistrationEmailHelp from '@/components/auth/RegistrationEmailHelp.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
@@ -201,6 +203,7 @@ const appStore = useAppStore()
 // ==================== State ====================
 
 const isLoading = ref<boolean>(false)
+const contactInfo = ref('')
 const isSendingCode = ref<boolean>(false)
 const errorMessage = ref<string>('')
 const codeSent = ref<boolean>(false)
@@ -346,6 +349,7 @@ onMounted(async () => {
   // Load public settings
   try {
     const settings = await getPublicSettings()
+    contactInfo.value = settings.contact_info || ''
     turnstileEnabled.value = settings.turnstile_enabled
     turnstileSiteKey.value = settings.turnstile_site_key || ''
     tencentCaptchaEnabled.value = settings.tencent_captcha_enabled === true

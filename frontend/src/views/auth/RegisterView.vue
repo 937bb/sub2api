@@ -277,6 +277,7 @@
           }}
         </button>
 
+        <RegistrationEmailHelp v-if="emailVerifyEnabled" :contact-info="contactInfo" />
       </form>
 
       <div v-if="showOAuthLogin" class="space-y-3 pt-1">
@@ -340,6 +341,7 @@
 </template>
 
 <script setup lang="ts">
+import RegistrationEmailHelp from '@/components/auth/RegistrationEmailHelp.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
 import { computed, ref, reactive, onMounted, onUnmounted, watch } from 'vue'
@@ -400,6 +402,7 @@ const confirmPassword = ref('')
 // Public settings
 const registrationEnabled = ref<boolean>(true)
 const emailVerifyEnabled = ref<boolean>(false)
+const contactInfo = ref('')
 // Public settings are injected into the app store before Vue mounts. Use that
 // value for the first render so a disabled promo-code field never flashes
 // while the async settings request is still in flight. If injection is
@@ -541,6 +544,7 @@ onMounted(async () => {
 
   try {
     const settings = await getPublicSettings()
+    contactInfo.value = settings.contact_info || ''
     registrationEnabled.value = settings.registration_enabled
     emailVerifyEnabled.value = settings.email_verify_enabled
     promoCodeEnabled.value = settings.promo_code_enabled
