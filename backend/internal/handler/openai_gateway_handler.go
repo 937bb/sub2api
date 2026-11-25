@@ -3969,6 +3969,10 @@ func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, stream
 	}
 	if len(forwardErrors) > 0 {
 		var transport *service.PluginTransportError
+		if errors.As(forwardErrors[0], &transport) && transport.RequestSent && transport.Unavailable {
+			h.handleStreamingAwareErrorWithCode(c, http.StatusServiceUnavailable, "server_error", "server_overloaded", "Upstream service temporarily unavailable, please retry later", streamStarted, false)
+			return true
+		}
 		if errors.As(forwardErrors[0], &transport) && transport.RequestSent && transport.RateLimited {
 			h.handleStreamingAwareErrorWithCode(c, http.StatusTooManyRequests, "rate_limit_error", "rate_limit_exceeded", "Upstream rate limit exceeded, please retry later", streamStarted, false)
 			return true

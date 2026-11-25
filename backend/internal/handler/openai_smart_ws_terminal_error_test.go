@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -72,6 +73,30 @@ func TestSmartWSRateLimitRemains429WithoutReplay(t *testing.T) {
 			require.Contains(t, rec.Body.String(), "event: response.failed")
 		} else {
 			require.Equal(t, http.StatusTooManyRequests, rec.Code)
+			require.True(t, gjson.ValidBytes(rec.Body.Bytes()))
+		}
+	}
+}
+
+func TestSmartWSUnavailableRemains503WithoutReplay(t *testing.T) {
+	for _, heartbeat := range []bool{false, true} {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+		if heartbeat {
+			_, _ = c.Writer.WriteString(":\n\n")
+			c.Writer.Flush()
+		}
+		h := &OpenAIGatewayHandler{}
+		err := fmt.Errorf("outer: %w", &service.PluginTransportError{RequestSent: true, Unavailable: true})
+		require.True(t, h.ensureForwardErrorResponse(c, false, err))
+		require.Contains(t, rec.Body.String(), "server_overloaded")
+		require.NotContains(t, rec.Body.String(), "upstream_error")
+		if heartbeat {
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed"))
+		} else {
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 			require.True(t, gjson.ValidBytes(rec.Body.Bytes()))
 		}
 	}

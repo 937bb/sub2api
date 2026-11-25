@@ -365,6 +365,8 @@ type PluginTransportError struct {
 	// RateLimited retains an explicit upstream 429 without exposing the
 	// dispatched request as a retryable UpstreamFailoverError.
 	RateLimited bool
+	// Unavailable retains an explicit upstream 503 without enabling replay.
+	Unavailable bool
 }
 
 func (e *PluginTransportError) Error() string {

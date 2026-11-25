@@ -223,3 +223,19 @@ func TestGroupSmartWSAccountOffAndHTTPBridgeOverrideLegacyEnabled(t *testing.T) 
 	}
 	require.Equal(t, before+2, groupSmartWSEligibilitySnapshot()["skip_account_mode"])
 }
+
+func TestGroupSmartWSDispatchedUnavailableDoesNotEnableReplay(t *testing.T) {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusBadGateway, http.StatusTooManyRequests} {
+		attempt := &groupSmartWSAttempt{}
+		attempt.sent.Store(true)
+		err := finishGroupSmartWSAttempt(attempt, &UpstreamFailoverError{StatusCode: status})
+		var dispatched *PluginTransportError
+		require.ErrorAs(t, err, &dispatched)
+		require.True(t, dispatched.RequestSent)
+		require.Equal(t, status == http.StatusServiceUnavailable, dispatched.Unavailable)
+		require.Equal(t, status == http.StatusTooManyRequests, dispatched.RateLimited)
+		var failover *UpstreamFailoverError
+		require.False(t, errors.As(err, &failover))
+		require.Same(t, err, finishGroupSmartWSAttempt(attempt, err))
+	}
+}
