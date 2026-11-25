@@ -155,7 +155,7 @@ func sanitizeOpenAIEncryptedInputItem(item any, invalid map[string]struct{}) (an
 // SanitizeOpenAIEncryptedContent preserves plaintext and tool exchanges and
 // never mutates the canonical request bytes.
 func SanitizeOpenAIEncryptedContent(body []byte) ([]byte, bool, error) {
-	if !OpenAIRequestHasEncryptedContent(body) {
+	if openAIRequestHasEncryptedToolOutput(body) || !OpenAIRequestHasEncryptedContent(body) {
 		return body, false, nil
 	}
 	var decoded map[string]any

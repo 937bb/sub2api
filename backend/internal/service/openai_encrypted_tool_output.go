@@ -82,7 +82,7 @@ func bindOpenAIEncryptedToolOutputAttempt(ctx context.Context, account *Account)
 // Log only bounded ciphertext fingerprints and structural counts, never tool
 // output text, ciphertext, names, headers, credentials, or the request body.
 func logOpenAIEncryptedToolOutputRejection(ctx context.Context, account *Account, body []byte, err error) {
-	if account == nil || err == nil || (!errors.Is(err, errOpenAIInvalidEncryptedToolOutput) && !isOpenAIInvalidEncryptedToolOutputMessage(err.Error())) {
+	if account == nil || !isOpenAIEncryptedRequestError(err) || !openAIRequestHasEncryptedToolOutput(body) {
 		return
 	}
 	count := 0

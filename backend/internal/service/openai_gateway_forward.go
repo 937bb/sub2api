@@ -891,7 +891,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			return true
 		}
 		recoverInvalidEncryptedContent := func(attempt int) bool {
-			if wsInvalidEncryptedContentRecoveryTried {
+			if wsInvalidEncryptedContentRecoveryTried || openAIRequestHasEncryptedToolOutput(lineageEntryBody) {
 				return false
 			}
 			// 写入 lineage 后，同一失效密文在后续 turn 进场时被预剥离，不再重复
@@ -1162,7 +1162,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
-			if !httpInvalidEncryptedContentRetryTried && isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, respBody) {
+			if !httpInvalidEncryptedContentRetryTried && !openAIRequestHasEncryptedToolOutput(body) && isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, respBody) {
 				decoded, decodeErr := ensureReqBody()
 				if decodeErr != nil {
 					return nil, decodeErr
