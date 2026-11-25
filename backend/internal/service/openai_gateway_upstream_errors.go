@@ -310,7 +310,7 @@ func (s *OpenAIGatewayService) shouldFailoverUpstreamError(statusCode int) bool 
 }
 
 func (s *OpenAIGatewayService) shouldFailoverOpenAIUpstreamResponse(account *Account, statusCode int, upstreamMsg string, upstreamBody []byte) bool {
-	if isOpenAIInvalidEncryptedContentResponse(statusCode, upstreamBody) {
+	if openAIEncryptedRequestResponseError(statusCode, upstreamBody) != nil {
 		return false
 	}
 	// cyber_policy is request-scoped even when an intermediary wraps the
@@ -595,12 +595,12 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
 
-	if isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, body) {
+	if encryptedErr := openAIEncryptedRequestResponseError(resp.StatusCode, body); encryptedErr != nil {
 		message := sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(body))
 		setOpsUpstreamError(c, resp.StatusCode, message, "")
 		MarkResponseCommitted(c)
 		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, message)
-		return nil, errOpenAIInvalidEncryptedContent
+		return nil, encryptedErr
 	}
 
 	// cyber_policy 硬阻断：透传上游原始错误体给客户端（不重包成通用 502），不冷却账号。

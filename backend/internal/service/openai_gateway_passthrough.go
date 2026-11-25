@@ -755,7 +755,7 @@ func stripOpenAILegacyResponsesBeta(headers http.Header) {
 }
 
 func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, responseBody []byte) bool {
-	if isOpenAIInvalidEncryptedContentResponse(statusCode, responseBody) {
+	if openAIEncryptedRequestResponseError(statusCode, responseBody) != nil {
 		return false
 	}
 	if hit, _, _ := detectOpenAICyberPolicy(responseBody); hit {
@@ -926,12 +926,12 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	MarkResponseCommitted(c)
 	body := s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)
 
-	if isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, body) {
+	if encryptedErr := openAIEncryptedRequestResponseError(resp.StatusCode, body); encryptedErr != nil {
 		message := sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(body))
 		setOpsUpstreamError(c, resp.StatusCode, message, "")
 		MarkResponseCommitted(c)
 		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, message)
-		return errOpenAIInvalidEncryptedContent
+		return encryptedErr
 	}
 
 	// cyber_policy 仍按原始 body 打内部标记，供 handler 事后写风控/邮件；面向客户端的

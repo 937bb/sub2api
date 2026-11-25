@@ -16,13 +16,16 @@ var errOpenAIInvalidEncryptedContent = errors.New("openai request contains inval
 
 func isOpenAIInvalidEncryptedContentMessage(message string) bool {
 	message = strings.ToLower(strings.TrimSpace(message))
+	if isOpenAIInvalidEncryptedToolOutputMessage(message) {
+		return false
+	}
 	return strings.Contains(message, "invalid_encrypted_content") ||
 		((strings.Contains(message, "encrypted content") || strings.Contains(message, "encrypted_content")) &&
 			(strings.Contains(message, "could not be verified") || strings.Contains(message, "could not be decrypted") || strings.Contains(message, "hydration failed")))
 }
 
 func isOpenAIInvalidEncryptedContentResponse(status int, body []byte) bool {
-	return status == http.StatusBadRequest && (strings.EqualFold(extractUpstreamErrorCode(body), "invalid_encrypted_content") || isOpenAIInvalidEncryptedContentMessage(extractUpstreamErrorMessage(body)))
+	return status == http.StatusBadRequest && !isOpenAIInvalidEncryptedToolOutputMessage(extractUpstreamErrorMessage(body)) && (strings.EqualFold(extractUpstreamErrorCode(body), "invalid_encrypted_content") || isOpenAIInvalidEncryptedContentMessage(extractUpstreamErrorMessage(body)))
 }
 
 func isOpenAIInvalidEncryptedContentError(err error) bool {
@@ -175,16 +178,20 @@ func OpenAIRequestHasEncryptedContent(body []byte) bool {
 }
 
 type openAIEncryptedAffinityKey struct{}
-type openAIEncryptedAffinity struct{ owner atomic.Int64 }
+type openAIEncryptedAffinity struct {
+	owner      atomic.Int64
+	toolOutput bool
+}
 
 // Snapshot ownership before selection can replace the shared sticky binding.
 // Unknown ownership preserves the first attempt; a bounded recovery handles
 // actual upstream rejection rather than discarding unproven-invalid context.
 func (s *OpenAIGatewayService) WithOpenAIEncryptedContentAffinity(ctx context.Context, groupID *int64, sessionHash, previousResponseID string, body []byte) context.Context {
-	if s == nil || !OpenAIRequestHasEncryptedContent(body) {
+	toolOutput := openAIRequestHasEncryptedToolOutput(body)
+	if s == nil || (!toolOutput && !OpenAIRequestHasEncryptedContent(body)) {
 		return ctx
 	}
-	affinity := &openAIEncryptedAffinity{}
+	affinity := &openAIEncryptedAffinity{toolOutput: toolOutput}
 	var owner int64
 	if previousResponseID != "" {
 		if store := s.getOpenAIWSStateStore(); store != nil {
@@ -237,8 +244,5 @@ func openAIEncryptedContentEventError(payload []byte) error {
 	if response := gjson.GetBytes(payload, "response"); response.IsObject() {
 		payload = []byte(response.Raw)
 	}
-	if isOpenAIInvalidEncryptedContentResponse(http.StatusBadRequest, payload) {
-		return errOpenAIInvalidEncryptedContent
-	}
-	return nil
+	return openAIEncryptedRequestResponseError(http.StatusBadRequest, payload)
 }

@@ -397,7 +397,29 @@ func (s *defaultOpenAIAccountScheduler) Select(
 	defer func() {
 		decision.LatencyMs = time.Since(start).Milliseconds()
 		s.metrics.recordSelect(decision)
+		if err == nil && selection != nil {
+			bindOpenAIEncryptedToolOutputAttempt(ctx, selection.Account)
+		}
 	}()
+
+	// A required encrypted tool result cannot be moved to another credential.
+	// Use the ownership snapshot, not a sticky binding another request can replace.
+	if owner := openAIEncryptedToolOutputOwner(ctx); owner > 0 {
+		req.StickyAccountID = owner
+		req.PreserveStickyBinding = true
+		selection, _, err = s.selectBySessionHash(ctx, req)
+		if err != nil {
+			return nil, decision, err
+		}
+		if selection == nil || selection.Account == nil {
+			return nil, decision, fmt.Errorf("%w: encrypted tool output account is unavailable", ErrNoAvailableAccounts)
+		}
+		decision.Layer = openAIAccountScheduleLayerSessionSticky
+		decision.StickySessionHit = true
+		decision.SelectedAccountID = selection.Account.ID
+		decision.SelectedAccountType = selection.Account.Type
+		return selection, decision, nil
+	}
 
 	previousResponseID := strings.TrimSpace(req.PreviousResponseID)
 	if previousResponseID != "" && NormalizeOpenAICompatiblePlatform(req.Platform) == PlatformOpenAI &&
@@ -503,7 +525,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 	req OpenAIAccountScheduleRequest,
 ) (*AccountSelectionResult, bool, error) {
 	sessionHash := strings.TrimSpace(req.SessionHash)
-	if sessionHash == "" || s == nil || s.service == nil || s.service.cache == nil {
+	if s == nil || s.service == nil || ((sessionHash == "" || s.service.cache == nil) && openAIEncryptedToolOutputOwner(ctx) <= 0) {
 		return nil, false, nil
 	}
 
@@ -2376,6 +2398,10 @@ func (s *OpenAIGatewayService) selectAccountWithSchedulerOnce(
 		guardianParentAccountID = s.resolveOpenAIGuardianParentAccountID(ctx, groupID)
 	}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
+	if affinity, _ := ctx.Value(openAIEncryptedAffinityKey{}).(*openAIEncryptedAffinity); scheduler == nil && affinity != nil && affinity.toolOutput {
+		// Required ciphertext affinity also applies when advanced scheduling is off.
+		scheduler = newDefaultOpenAIAccountScheduler(s, nil)
+	}
 	if scheduler == nil {
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
 		if selection, hit, err := s.selectLegacyAccountByPreviousResponse(ctx, groupID, previousResponseID, sessionHash, requestedModel, excludedIDs, requiredTransport, requiredCapability, requiredImageCapability, requireCompact, platform); err != nil {
@@ -2565,7 +2591,7 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 	if account == nil {
 		return false
 	}
-	if !success && len(observedErr) > 0 && isOpenAIInvalidEncryptedContentError(observedErr[0]) {
+	if !success && len(observedErr) > 0 && isOpenAIEncryptedRequestError(observedErr[0]) {
 		return false
 	}
 	accountID := account.ID
@@ -2592,7 +2618,7 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 // ObserveOpenAIAccountHealthFailure records failures that cannot reach the
 // scheduler-result path, for example after semantic response bytes were sent.
 func (s *OpenAIGatewayService) ObserveOpenAIAccountHealthFailure(ctx context.Context, account *Account, observedErr error) bool {
-	if s == nil || s.rateLimitService == nil || account == nil || observedErr == nil || isOpenAIInvalidEncryptedContentError(observedErr) {
+	if s == nil || s.rateLimitService == nil || account == nil || observedErr == nil || isOpenAIEncryptedRequestError(observedErr) {
 		return false
 	}
 	return s.rateLimitService.ObserveOpenAIAPIKeyHealthFailure(ctx, account, observedErr)
