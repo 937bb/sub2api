@@ -306,3 +306,21 @@ func TestEncryptedToolOutputPassthroughCompactKeepsRequestFailure(t *testing.T) 
 	require.NotContains(t, rec.Body.String(), "relay.example")
 	require.NotContains(t, rec.Body.String(), "sk-test-secret")
 }
+
+func TestEncryptedPassthroughMissingCodeRequiresVerificationFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, code, message string
+		want                bool
+	}{
+		{"missing code", "", "Encrypted content could not be verified", true},
+		{"echoed name", "", "echoed user text: invalid_encrypted_content", false},
+		{"different explicit code", "invalid_value", "Encrypted content could not be verified", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{"error": map[string]any{"code": tc.code, "message": tc.message}})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, isOpenAIPassthroughInvalidEncryptedContentResponse(400, tc.message, body))
+			require.False(t, isOpenAIPassthroughInvalidEncryptedContentResponse(500, tc.message, body))
+		})
+	}
+}

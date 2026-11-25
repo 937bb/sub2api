@@ -877,10 +877,12 @@ func isOpenAIPassthroughInvalidEncryptedContentResponse(statusCode int, upstream
 	if code == "invalid_encrypted_content" {
 		return true
 	}
-	if code == "thinking_signature_invalid" {
+	// Some Responses upstreams omit code for the same verification failure.
+	// Do not interpret an echoed error name or a different explicit code as one.
+	if code == "thinking_signature_invalid" || code == "" {
 		lowerMsg := strings.ToLower(strings.TrimSpace(upstreamMsg))
-		return strings.Contains(lowerMsg, "encrypted content") &&
-			(strings.Contains(lowerMsg, "could not be verified") || strings.Contains(lowerMsg, "could not be decrypted"))
+		return (strings.Contains(lowerMsg, "encrypted content") || strings.Contains(lowerMsg, "encrypted_content")) &&
+			(strings.Contains(lowerMsg, "could not be verified") || strings.Contains(lowerMsg, "could not be decrypted") || strings.Contains(lowerMsg, "hydration failed"))
 	}
 	return false
 }
