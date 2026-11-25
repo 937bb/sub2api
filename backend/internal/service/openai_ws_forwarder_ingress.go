@@ -1140,7 +1140,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), upstreamMessage, errCodeRaw, errTypeRaw, errMsgRaw, mappedModel)
 				fallbackReason, _ := classifyOpenAIWSErrorEventFromRaw(errCodeRaw, errTypeRaw, errMsgRaw)
-				if fallbackReason == openAIWSFallbackReasonInvalidEncryptedContent {
+				if fallbackReason == openAIWSFallbackReasonInvalidEncryptedContent && !openAIRequestHasEncryptedToolOutput(payload) {
 					// 记录被上游拒绝的密文摘要；错误照旧透传，下一轮进场时按摘要预剥离。
 					if digests := collectOpenAIEncryptedContentDigestsRaw(payload); len(digests) > 0 {
 						s.markOpenAIWSInvalidEncryptedContentLineage(groupID, sessionHash, digests)
