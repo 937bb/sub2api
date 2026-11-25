@@ -41,26 +41,37 @@ func isOpenAIEncryptedRequestError(err error) bool {
 		(err != nil && isOpenAIInvalidEncryptedToolOutputMessage(err.Error()))
 }
 
-// Inspect only the Responses protocol's content array, never strings containing
-// JSON or arbitrary tool-owned objects that happen to use similar field names.
-func openAIRequestHasEncryptedToolOutput(body []byte) bool {
-	found := false
+// Visit required opaque tool context at protocol-owned locations only. Agent
+// messages carry encrypted results in content, while sealed calls carry their
+// context directly on the item. Neither may use optional reasoning recovery.
+func visitOpenAIRequiredEncryptedContext(body []byte, visit func(string)) {
 	openAIRequestPayloadView(body).Get("input").ForEach(func(_, item gjson.Result) bool {
+		var parts gjson.Result
 		switch item.Get("type").String() {
 		case "function_call_output", "custom_tool_call_output":
-			output := item.Get("output")
-			if output.IsArray() {
-				output.ForEach(func(_, part gjson.Result) bool {
-					encrypted := part.Get("encrypted_content")
-					if part.Get("type").String() == "encrypted_content" && encrypted.Type == gjson.String && encrypted.Str != "" {
-						found = true
-					}
-					return !found
-				})
+			parts = item.Get("output")
+		case "agent_message":
+			parts = item.Get("content")
+		case "function_call", "custom_tool_call":
+			if encrypted := item.Get("encrypted_content"); encrypted.Type == gjson.String && encrypted.Str != "" {
+				visit(encrypted.Str)
 			}
 		}
-		return !found
+		if parts.IsArray() {
+			parts.ForEach(func(_, part gjson.Result) bool {
+				if encrypted := part.Get("encrypted_content"); part.Get("type").String() == "encrypted_content" && encrypted.Type == gjson.String && encrypted.Str != "" {
+					visit(encrypted.Str)
+				}
+				return true
+			})
+		}
+		return true
 	})
+}
+
+func openAIRequestHasEncryptedToolOutput(body []byte) bool {
+	found := false
+	visitOpenAIRequiredEncryptedContext(body, func(string) { found = true })
 	return found
 }
 
@@ -87,24 +98,12 @@ func logOpenAIEncryptedToolOutputRejection(ctx context.Context, account *Account
 	}
 	count := 0
 	fingerprints := make([]string, 0, 8)
-	openAIRequestPayloadView(body).Get("input").ForEach(func(_, item gjson.Result) bool {
-		if kind := item.Get("type").String(); kind != "function_call_output" && kind != "custom_tool_call_output" {
-			return true
+	visitOpenAIRequiredEncryptedContext(body, func(encrypted string) {
+		count++
+		if len(fingerprints) < cap(fingerprints) {
+			digest := sha256.Sum256([]byte(encrypted))
+			fingerprints = append(fingerprints, fmt.Sprintf("%x", digest[:12]))
 		}
-		if output := item.Get("output"); output.IsArray() {
-			output.ForEach(func(_, part gjson.Result) bool {
-				encrypted := part.Get("encrypted_content")
-				if part.Get("type").String() == "encrypted_content" && encrypted.Type == gjson.String {
-					count++
-					if len(fingerprints) < cap(fingerprints) {
-						digest := sha256.Sum256([]byte(encrypted.Str))
-						fingerprints = append(fingerprints, fmt.Sprintf("%x", digest[:12]))
-					}
-				}
-				return true
-			})
-		}
-		return true
 	})
 	logger.FromContext(ctx).Warn("openai.encrypted_tool_output_rejected",
 		zap.Int64("account_id", account.ID),
