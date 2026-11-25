@@ -1089,12 +1089,12 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	MarkResponseCommitted(c)
 	body := s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)
 
-	if encryptedErr := openAIEncryptedRequestResponseError(resp.StatusCode, body); encryptedErr != nil {
-		message := sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(body))
-		setOpsUpstreamError(c, resp.StatusCode, message, "")
-		MarkResponseCommitted(c)
-		writeOpenAIUpstreamClientError(c, resp.StatusCode, body, message)
-		return encryptedErr
+	// Preserve request-level affinity semantics while using the shared error
+	// envelope, redaction rules, and compact SSE terminal-event writer below.
+	encryptedErr := openAIEncryptedRequestResponseError(resp.StatusCode, body)
+	if !isOpenAIPassthroughInvalidEncryptedContentResponse(resp.StatusCode, extractUpstreamErrorMessage(body), body) &&
+		!errors.Is(encryptedErr, errOpenAIInvalidEncryptedToolOutput) {
+		encryptedErr = nil
 	}
 
 	// cyber_policy 仍按原始 body 打内部标记，供 handler 事后写风控/邮件；面向客户端的
@@ -1124,7 +1124,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
 	// 错误体虽不会原样透传，运行态账号状态仍需更新，避免粘性路由继续复用
 	// 刚被限流的账号。cyber 例外：不冷却账号。
-	if !cyberHit {
+	if !cyberHit && encryptedErr == nil {
 		reqModel, _, _ := extractOpenAIRequestMetaFromBody(requestBody)
 		canonicalModel := canonicalOpenAIAccountSchedulingModel(account, reqModel)
 		_ = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, canonicalModel)
@@ -1174,6 +1174,9 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 			}
 			writeOpenAIPassthroughErrorEnvelope(c, status, resp.Header, errMsg)
 		}
+		if encryptedErr != nil {
+			return encryptedErr
+		}
 		return fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
 	}
 
@@ -1181,7 +1184,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	// （shouldFailoverOpenAIPassthroughResponse 已保证不切号），客户端需要其
 	// error.code/param/message 做明确处理（如丢弃失效加密思考块或触发自动压缩）；
 	// 在净化信封内仅保留标准字段并脱敏，不暴露上游额外字段与敏感头。
-	if isOpenAIPassthroughInvalidEncryptedContentResponse(resp.StatusCode, upstreamMsg, body) {
+	if encryptedErr != nil {
 		writeOpenAIPassthroughStructuredErrorEnvelope(
 			c,
 			resp.StatusCode,
@@ -1207,6 +1210,9 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 		writeSanitizedOpenAIPassthroughError(c, resp.StatusCode, resp.Header)
 	}
 
+	if encryptedErr != nil {
+		return encryptedErr
+	}
 	return fmt.Errorf("upstream error: %d (client response sanitized)", resp.StatusCode)
 }
 
