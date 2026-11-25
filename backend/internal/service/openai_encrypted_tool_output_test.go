@@ -22,6 +22,44 @@ const encryptedToolOutputMessage = "Encrypted function output content could not 
 const encryptedToolOutputRejection = `{"error":{"code":"invalid_encrypted_content","type":"invalid_request_error","message":"` + encryptedToolOutputMessage + `"}}`
 const encryptedToolOutputFixture = `{"model":"gpt-5.1","stream":false,"input":[{"type":"reasoning","encrypted_content":"reasoning-cipher","summary":[]},{"type":"function_call","call_id":"call_1","name":"lookup","arguments":"{}"},{"type":"function_call_output","call_id":"call_1","output":[{"type":"input_text","text":"visible output"},{"type":"encrypted_content","encrypted_content":"opaque-tool-result"}]}]}`
 
+func TestEncryptedAgentContextPreservedAndPinned(t *testing.T) {
+	for _, item := range []string{
+		`{"type":"agent_message","author":"agent-a","recipient":"agent-b","content":[{"type":"input_text","text":"keep message"},{"type":"encrypted_content","encrypted_content":"opaque-agent-result"}]}`,
+		`{"type":"function_call","call_id":"call_sealed","name":"send_message","encrypted_content":"opaque-call-context","arguments":"{}"}`,
+		`{"type":"custom_tool_call","call_id":"call_sealed","name":"exec","encrypted_content":"opaque-call-context","input":"command"}`,
+	} {
+		for _, envelope := range []bool{false, true} {
+			body := []byte(`{"input":[{"type":"reasoning","encrypted_content":"keep-reasoning","summary":[]},` + item + `]}`)
+			if envelope {
+				body = []byte(`{"type":"response.create","response":` + string(body) + `}`)
+			}
+			require.True(t, openAIRequestHasEncryptedToolOutput(body))
+			cleaned, changed, err := SanitizeOpenAIEncryptedContent(body)
+			require.NoError(t, err)
+			require.False(t, changed)
+			require.Equal(t, body, cleaned)
+			store := NewOpenAIWSStateStore(nil)
+			require.NoError(t, store.BindResponseAccount(context.Background(), 9, "resp_owner", 1, time.Hour))
+			svc := &OpenAIGatewayService{openaiWSStateStore: store}
+			group := int64(9)
+			ctx := svc.WithOpenAIEncryptedContentAffinity(context.Background(), &group, "session", "resp_owner", body)
+			require.EqualValues(t, 1, openAIEncryptedToolOutputOwner(ctx))
+			bindOpenAIEncryptedToolOutputAttempt(ctx, &Account{ID: 2})
+			require.EqualValues(t, 1, openAIEncryptedToolOutputOwner(ctx))
+			cleaned, err = SanitizeOpenAIEncryptedContentForAccount(ctx, &Account{ID: 2, Platform: PlatformOpenAI}, body)
+			require.NoError(t, err)
+			require.Equal(t, body, cleaned)
+		}
+	}
+	for _, body := range []string{
+		`{"input":[{"type":"agent_message","content":[{"type":"input_text","text":"encrypted_content"}]}]}`,
+		`{"input":[{"type":"agent_message","content":{"type":"encrypted_content","encrypted_content":"tool-owned-json"}}]}`,
+		`{"input":[{"type":"function_call","arguments":"{\"encrypted_content\":\"user-json\"}"}]}`,
+	} {
+		require.False(t, openAIRequestHasEncryptedToolOutput([]byte(body)))
+	}
+}
+
 func TestEncryptedToolOutputDetectionAndPreservation(t *testing.T) {
 	for _, envelope := range []bool{false, true} {
 		for _, kind := range []string{"function_call_output", "custom_tool_call_output"} {
@@ -68,43 +106,53 @@ func TestEncryptedToolOutputRejectionIsNotReasoningRecovery(t *testing.T) {
 
 func TestEncryptedToolOutputNoReplayAcrossHTTPPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, generic := range []bool{false, true} {
-		rejection := encryptedToolOutputRejection
-		wantErr := errOpenAIInvalidEncryptedToolOutput
-		message := encryptedToolOutputMessage
-		if generic {
-			rejection = encryptedRejectionFixture
-			wantErr = errOpenAIInvalidEncryptedContent
-			message = "could not be verified"
-		}
-		for _, path := range []string{"standard", "passthrough", "bridge"} {
-			t.Run(fmt.Sprintf("%s/generic=%v", path, generic), func(t *testing.T) {
-				upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{{StatusCode: 400, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(rejection))}}}
-				svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}, httpUpstream: upstream}
-				account := &Account{ID: 2, Status: StatusActive, Schedulable: true, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "test-only", "pool_mode": true, "pool_mode_retry_status_codes": []any{400}}, Extra: map[string]any{"openai_passthrough": path == "passthrough"}}
-				recorder := httptest.NewRecorder()
-				c, _ := gin.CreateTestContext(recorder)
-				c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
-				SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
-				body := []byte(encryptedToolOutputFixture)
-				var err error
-				var events [][]byte
-				if path == "bridge" {
-					_, err = svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-only", body, len(body), "gpt-5.1", "", "", "", "", 1, func(b []byte) error { events = append(events, b); return nil })
-					require.Len(t, events, 1)
-					require.Contains(t, string(events[0]), message)
-				} else {
-					_, err = svc.Forward(context.Background(), c, account, body)
-					require.Equal(t, 400, recorder.Code)
-					require.Contains(t, recorder.Body.String(), message)
-				}
-				require.ErrorIs(t, err, wantErr)
-				require.Equal(t, 1, upstream.callCount)
-				require.JSONEq(t, gjson.GetBytes(body, "input.2.output").Raw, gjson.GetBytes(upstream.bodies[0], "input.2.output").Raw)
-				require.Contains(t, string(upstream.bodies[0]), "reasoning-cipher")
-				require.False(t, svc.shouldFailoverOpenAIUpstreamResponse(account, 400, encryptedToolOutputMessage, []byte(rejection)))
-				require.False(t, shouldFailoverOpenAIPassthroughResponse(account, 400, []byte(rejection)))
-			})
+	for fixtureName, fixture := range map[string]string{
+		"tool_output":   encryptedToolOutputFixture,
+		"agent_message": `{"model":"gpt-5.1","input":[{"type":"reasoning","encrypted_content":"reasoning-cipher","summary":[]},{"type":"agent_message","author":"a","recipient":"b","content":[{"type":"encrypted_content","encrypted_content":"opaque-agent-result"}]}]}`,
+		"sealed_call":   `{"model":"gpt-5.1","input":[{"type":"reasoning","encrypted_content":"reasoning-cipher","summary":[]},{"type":"function_call","call_id":"sealed","name":"lookup","arguments":"{}","encrypted_content":"opaque-call"}]}`,
+	} {
+		for _, generic := range []bool{false, true} {
+			rejection := encryptedToolOutputRejection
+			wantErr := errOpenAIInvalidEncryptedToolOutput
+			message := encryptedToolOutputMessage
+			if generic {
+				rejection = encryptedRejectionFixture
+				wantErr = errOpenAIInvalidEncryptedContent
+				message = "could not be verified"
+			}
+			for _, path := range []string{"standard", "passthrough", "bridge"} {
+				t.Run(fmt.Sprintf("%s/%s/generic=%v", fixtureName, path, generic), func(t *testing.T) {
+					upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{{StatusCode: 400, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(rejection))}}}
+					svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}, httpUpstream: upstream}
+					account := &Account{ID: 2, Status: StatusActive, Schedulable: true, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "test-only", "pool_mode": true, "pool_mode_retry_status_codes": []any{400}}, Extra: map[string]any{"openai_passthrough": path == "passthrough"}}
+					recorder := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(recorder)
+					c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+					SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+					body := []byte(fixture)
+					var err error
+					var events [][]byte
+					if path == "bridge" {
+						_, err = svc.proxyOpenAIWSHTTPBridgeTurn(context.Background(), c, account, "test-only", body, len(body), "gpt-5.1", "", "", "", "", 1, func(b []byte) error { events = append(events, b); return nil })
+						require.Len(t, events, 1)
+						require.Contains(t, string(events[0]), message)
+					} else {
+						_, err = svc.Forward(context.Background(), c, account, body)
+						require.Equal(t, 400, recorder.Code)
+						require.Contains(t, recorder.Body.String(), message)
+					}
+					require.ErrorIs(t, err, wantErr)
+					require.Equal(t, 1, upstream.callCount)
+					var before, after []string
+					visitOpenAIRequiredEncryptedContext(body, func(v string) { before = append(before, v) })
+					visitOpenAIRequiredEncryptedContext(upstream.bodies[0], func(v string) { after = append(after, v) })
+					require.NotEmpty(t, before)
+					require.Equal(t, before, after)
+					require.Contains(t, string(upstream.bodies[0]), "reasoning-cipher")
+					require.False(t, svc.shouldFailoverOpenAIUpstreamResponse(account, 400, encryptedToolOutputMessage, []byte(rejection)))
+					require.False(t, shouldFailoverOpenAIPassthroughResponse(account, 400, []byte(rejection)))
+				})
+			}
 		}
 	}
 }
