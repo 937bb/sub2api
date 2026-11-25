@@ -158,3 +158,42 @@ func TestEncryptedRoutingUnavailableOwnerFallsBackBeforeDispatch(t *testing.T) {
 		})
 	}
 }
+
+func TestEncryptedStreamRejectionPrecleansNextClientTurn(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, passthrough := range []bool{false, true} {
+		t.Run(fmt.Sprint(passthrough), func(t *testing.T) {
+			response := func(event string) *http.Response {
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: " + event + "\n\n"))}
+			}
+			failure := `{"type":"response.failed","response":{"id":"resp_failed","status":"failed","error":` + gjson.Get(mixedEncryptedRejection, "error").Raw + `}}`
+			success := `{"type":"response.completed","response":{"id":"resp_ok","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"OK"}]}],"usage":{"input_tokens":1,"output_tokens":1}}}`
+			upstream := &httpUpstreamSequenceRecorder{responses: []*http.Response{response(failure), response(success)}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}}, httpUpstream: upstream, openaiWSStateStore: NewOpenAIWSStateStore(nil)}
+			account := &Account{ID: 2, Status: StatusActive, Schedulable: true, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1, Credentials: map[string]any{"api_key": "test-only"}, Extra: map[string]any{"openai_passthrough": passthrough}}
+			body := []byte(strings.Replace(mixedEncryptedHistory, `"stream":false`, `"stream":true`, 1))
+			for turn := 0; turn < 2; turn++ {
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest("POST", "/v1/responses", nil)
+				c.Set(openAIWSIngressSessionHashContextKey, "stream-session")
+				SetOpenAIClientTransport(c, OpenAIClientTransportHTTP)
+				_, err := svc.Forward(context.Background(), c, account, body)
+				if turn == 0 {
+					require.Error(t, err)
+					require.Contains(t, rec.Body.String(), "response.failed")
+					require.Equal(t, 1, upstream.callCount, "A dispatched stream must never be replayed internally")
+				} else {
+					require.NoError(t, err)
+					require.Contains(t, rec.Body.String(), "response.completed")
+				}
+			}
+			require.Equal(t, 2, upstream.callCount)
+			require.Contains(t, string(upstream.bodies[0]), "bad-reasoning")
+			require.NotContains(t, string(upstream.bodies[1]), "bad-reasoning")
+			require.Contains(t, string(upstream.bodies[1]), "keep-reasoning")
+			require.Contains(t, string(upstream.bodies[1]), "keep-tool-result")
+			require.Contains(t, string(body), "bad-reasoning")
+		})
+	}
+}
