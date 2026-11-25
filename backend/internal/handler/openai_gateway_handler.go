@@ -3969,6 +3969,10 @@ func (h *OpenAIGatewayHandler) ensureForwardErrorResponse(c *gin.Context, stream
 	}
 	if len(forwardErrors) > 0 {
 		var transport *service.PluginTransportError
+		if errors.As(forwardErrors[0], &transport) && transport.RequestSent && transport.MissingItem {
+			h.handleStreamingAwareErrorWithCode(c, http.StatusBadRequest, "invalid_request_error", "item_not_found", "Referenced response item is unavailable. Resend its full content instead of an item reference.", streamStarted, false)
+			return true
+		}
 		if errors.As(forwardErrors[0], &transport) && transport.RequestSent && transport.Unavailable {
 			h.handleStreamingAwareErrorWithCode(c, http.StatusServiceUnavailable, "server_error", "server_overloaded", "Upstream service temporarily unavailable, please retry later", streamStarted, false)
 			return true

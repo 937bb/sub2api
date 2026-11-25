@@ -239,3 +239,22 @@ func TestGroupSmartWSDispatchedUnavailableDoesNotEnableReplay(t *testing.T) {
 		require.Same(t, err, finishGroupSmartWSAttempt(attempt, err))
 	}
 }
+
+func TestGroupSmartWSMissingItemPreservesRejectionWithoutReplay(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusBadGateway} {
+		attempt := &groupSmartWSAttempt{}
+		attempt.sent.Store(true)
+		err := finishGroupSmartWSAttempt(attempt, &UpstreamFailoverError{StatusCode: status, ResponseBody: []byte(`{"error":{"message":"Item with id 'item_test' not found. Items are not persisted when store is set to false."}}`)})
+		var dispatched *PluginTransportError
+		require.ErrorAs(t, err, &dispatched)
+		require.Equal(t, status == http.StatusBadRequest, dispatched.MissingItem)
+		var failover *UpstreamFailoverError
+		require.False(t, errors.As(err, &failover))
+	}
+	attempt := &groupSmartWSAttempt{}
+	attempt.sent.Store(true)
+	err := finishGroupSmartWSAttempt(attempt, &UpstreamFailoverError{StatusCode: http.StatusBadRequest, ResponseBody: []byte(`{"error":{"message":"Account unavailable"}}`)})
+	var dispatched *PluginTransportError
+	require.ErrorAs(t, err, &dispatched)
+	require.False(t, dispatched.MissingItem)
+}

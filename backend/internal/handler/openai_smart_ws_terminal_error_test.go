@@ -101,3 +101,27 @@ func TestSmartWSUnavailableRemains503WithoutReplay(t *testing.T) {
 		}
 	}
 }
+
+func TestSmartWSMissingItemRemains400WithoutReplay(t *testing.T) {
+	for _, heartbeat := range []bool{false, true} {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+		if heartbeat {
+			_, _ = c.Writer.WriteString(":\n\n")
+			c.Writer.Flush()
+		}
+		h := &OpenAIGatewayHandler{}
+		err := fmt.Errorf("outer: %w", &service.PluginTransportError{RequestSent: true, MissingItem: true})
+		require.True(t, h.ensureForwardErrorResponse(c, false, err))
+		require.Contains(t, rec.Body.String(), "item_not_found")
+		require.NotContains(t, rec.Body.String(), "upstream_error")
+		if heartbeat {
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.Equal(t, 1, strings.Count(rec.Body.String(), "event: response.failed"))
+		} else {
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.True(t, gjson.ValidBytes(rec.Body.Bytes()))
+		}
+	}
+}

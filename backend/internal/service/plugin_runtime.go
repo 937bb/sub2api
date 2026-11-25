@@ -367,6 +367,8 @@ type PluginTransportError struct {
 	RateLimited bool
 	// Unavailable retains an explicit upstream 503 without enabling replay.
 	Unavailable bool
+	// MissingItem preserves an unavailable response-item reference rejection.
+	MissingItem bool
 }
 
 func (e *PluginTransportError) Error() string {

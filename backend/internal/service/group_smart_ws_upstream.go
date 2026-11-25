@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
@@ -47,6 +48,10 @@ func finishGroupSmartWSAttempt(attempt *groupSmartWSAttempt, err error) error {
 	if errors.As(err, &failover) {
 		sentErr.RateLimited = failover.StatusCode == http.StatusTooManyRequests
 		sentErr.Unavailable = failover.StatusCode == http.StatusServiceUnavailable
+		message := strings.ToLower(extractUpstreamErrorMessage(failover.ResponseBody))
+		sentErr.MissingItem = failover.StatusCode == http.StatusBadRequest &&
+			strings.Contains(message, "item with id") && strings.Contains(message, "not found") &&
+			strings.Contains(message, "items are not persisted")
 	}
 	return sentErr
 }
