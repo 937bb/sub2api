@@ -1140,28 +1140,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), upstreamMessage, errCodeRaw, errTypeRaw, errMsgRaw, mappedModel)
 				fallbackReason, _ := classifyOpenAIWSErrorEventFromRaw(errCodeRaw, errTypeRaw, errMsgRaw)
-				if fallbackReason == openAIWSFallbackReasonInvalidEncryptedContent && !openAIRequestHasEncryptedToolOutput(payload) {
-					// 记录被上游拒绝的密文摘要；错误照旧透传，下一轮进场时按摘要预剥离。
-					if digests := collectOpenAIEncryptedContentDigestsRaw(payload); len(digests) > 0 {
-						s.markOpenAIWSInvalidEncryptedContentLineage(groupID, sessionHash, digests)
-						logOpenAIWSModeInfo(
-							"ingress_ws_invalid_encrypted_lineage_mark account_id=%d turn=%d digests=%d",
-							account.ID,
-							turn,
-							len(digests),
-						)
+				if fallbackReason == openAIWSFallbackReasonInvalidEncryptedContent {
+					retryBody, changed, retryErr := s.recoverOpenAIRejectedEncryptedHistory(c, account, payload, upstreamMessage, turn)
+					if retryErr != nil {
+						return nil, retryErr
 					}
-					// A self-contained turn can be retried before any output.
-					// Connection-bound continuations keep their existing recovery
-					// contract rather than losing history on a fresh socket.
-					if !wroteDownstream && turnPreviousResponseID == "" && rejectedFieldRetryState != nil {
-						retryBody, changed, retryErr := SanitizeOpenAIEncryptedContent(payload)
-						if retryErr != nil {
-							return nil, retryErr
-						}
-						if changed && rejectedFieldRetryState.Allow(retryBody) {
-							return nil, &openAIWSRejectedFieldRetryError{body: retryBody, reason: openAIWSFallbackReasonInvalidEncryptedContent}
-						}
+					// Only explicitly rejected, self-contained turns before output can
+					// retry. Connection-bound continuations retain the next-turn path.
+					if changed && !wroteDownstream && turnPreviousResponseID == "" && rejectedFieldRetryState.allowEncryptedHistory(retryBody) {
+						return nil, &openAIWSRejectedFieldRetryError{body: retryBody, reason: openAIWSFallbackReasonInvalidEncryptedContent}
 					}
 				}
 				errCode, errType, errMessage := summarizeOpenAIWSErrorEventFieldsFromRaw(errCodeRaw, errTypeRaw, errMsgRaw)

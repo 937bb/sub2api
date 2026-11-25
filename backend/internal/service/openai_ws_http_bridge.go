@@ -601,12 +601,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, openAIWSHTTPBridgeErrorBodyLimitBytes))
 		_ = resp.Body.Close()
 		markOpenAICyberPolicyEvent(c, respBody, resp.StatusCode, nil)
-		if !openAIRequestHasEncryptedToolOutput(body) && isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, respBody) {
-			s.markOpenAIWSInvalidEncryptedContentLineageFromPayload(
-				c, body, "ingress_ws_http_bridge_invalid_encrypted_lineage_mark", account.ID, turn,
-			)
+		if isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, respBody) {
 			if !invalidEncryptedRecoveryTried {
-				cleaned, changed, cleanErr := SanitizeOpenAIEncryptedContent(body)
+				cleaned, changed, cleanErr := s.recoverOpenAIRejectedEncryptedHistory(c, account, body, respBody, turn)
 				if cleanErr != nil {
 					return nil, cleanErr
 				}

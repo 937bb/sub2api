@@ -402,23 +402,24 @@ func (s *defaultOpenAIAccountScheduler) Select(
 		}
 	}()
 
-	// A required encrypted tool result cannot be moved to another credential.
-	// Use the ownership snapshot, not a sticky binding another request can replace.
+	// A sticky snapshot is a routing preference, not proof of ciphertext ownership.
+	// Keep a healthy owner (including its wait plan), but let normal selection
+	// handle a stale or unavailable binding before any upstream request is sent.
 	if owner := openAIEncryptedToolOutputOwner(ctx); owner > 0 {
-		req.StickyAccountID = owner
-		req.PreserveStickyBinding = true
-		selection, _, err = s.selectBySessionHash(ctx, req)
+		ownerReq := req
+		ownerReq.StickyAccountID = owner
+		ownerReq.PreserveStickyBinding = true
+		selection, _, err = s.selectBySessionHash(ctx, ownerReq)
 		if err != nil {
 			return nil, decision, err
 		}
-		if selection == nil || selection.Account == nil {
-			return nil, decision, fmt.Errorf("%w: encrypted tool output account is unavailable", ErrNoAvailableAccounts)
+		if selection != nil && selection.Account != nil {
+			decision.Layer = openAIAccountScheduleLayerSessionSticky
+			decision.StickySessionHit = true
+			decision.SelectedAccountID = selection.Account.ID
+			decision.SelectedAccountType = selection.Account.Type
+			return selection, decision, nil
 		}
-		decision.Layer = openAIAccountScheduleLayerSessionSticky
-		decision.StickySessionHit = true
-		decision.SelectedAccountID = selection.Account.ID
-		decision.SelectedAccountType = selection.Account.Type
-		return selection, decision, nil
 	}
 
 	previousResponseID := strings.TrimSpace(req.PreviousResponseID)

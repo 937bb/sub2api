@@ -55,9 +55,10 @@ var (
 )
 
 type openAIResponsesRejectedFieldRetryState struct {
-	mu             sync.Mutex
-	budget         *openAIResponsesRejectedFieldRetryBudget
-	seenBodyHashes map[[sha256.Size]byte]struct{}
+	mu                      sync.Mutex
+	budget                  *openAIResponsesRejectedFieldRetryBudget
+	seenBodyHashes          map[[sha256.Size]byte]struct{}
+	encryptedHistoryRetried bool
 }
 
 type openAIResponsesRejectedFieldRetryBudget struct {

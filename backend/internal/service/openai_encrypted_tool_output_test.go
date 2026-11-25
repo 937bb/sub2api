@@ -174,11 +174,15 @@ func TestEncryptedToolOutputPinsSnapshotDespiteStickyChanges(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, owner.ID, selection.Account.ID)
 	require.NotNil(t, selection.WaitPlan)
-	// An unavailable owner must not turn required ciphertext into a cross-account retry.
+	// A stale routing preference must not reject a request before dispatch.
 	req.ExcludedIDs = map[int64]struct{}{owner.ID: {}}
 	selection, _, err = scheduler.Select(ctx, req)
-	require.ErrorIs(t, err, ErrNoAvailableAccounts)
-	require.Nil(t, selection)
+	require.NoError(t, err)
+	require.Equal(t, other.ID, selection.Account.ID)
+	require.True(t, selection.Acquired)
+	cleaned, err := SanitizeOpenAIEncryptedContentForAccount(ctx, selection.Account, []byte(encryptedToolOutputFixture))
+	require.NoError(t, err)
+	require.Equal(t, encryptedToolOutputFixture, string(cleaned))
 }
 
 func TestEncryptedToolOutputDoesNotPenalizeAccount(t *testing.T) {
