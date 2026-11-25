@@ -639,12 +639,12 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		if upstreamMsg == "" {
 			upstreamMsg = http.StatusText(resp.StatusCode)
 		}
-		if isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, respBody) {
+		if encryptedErr := openAIEncryptedRequestResponseError(resp.StatusCode, respBody); encryptedErr != nil {
 			clientError := buildOpenAIWSHTTPBridgeErrorEvent(resp.StatusCode, upstreamMsg)
 			if writeErr := writeClientMessage(clientError); writeErr == nil {
 				markOpenAIWSClientVisibleFailure(c, "error", clientError)
 			}
-			return nil, errOpenAIInvalidEncryptedContent
+			return nil, encryptedErr
 		}
 		shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(account, resp.StatusCode, upstreamMsg, respBody)
 		if account.Platform == PlatformGrok {

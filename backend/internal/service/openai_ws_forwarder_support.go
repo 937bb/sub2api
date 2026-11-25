@@ -774,6 +774,9 @@ func classifyOpenAIWSErrorEventFromRaw(codeRaw, errTypeRaw, msgRaw string) (stri
 	errType := strings.ToLower(strings.TrimSpace(errTypeRaw))
 	msg := strings.ToLower(strings.TrimSpace(msgRaw))
 
+	if isOpenAIInvalidEncryptedToolOutputMessage(msg) {
+		return "encrypted_tool_output_invalid", false
+	}
 	switch code {
 	case "upgrade_required":
 		return "upgrade_required", true

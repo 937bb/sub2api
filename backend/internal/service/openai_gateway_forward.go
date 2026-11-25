@@ -24,6 +24,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	ctx = withAccountProxyAffinity(ctx, c, body)
 	ctx, smartWSAttempt := beginGroupSmartWSAttempt(ctx, c)
 	defer func() { smartWSError = finishGroupSmartWSAttempt(smartWSAttempt, smartWSError) }()
+	defer func() { logOpenAIEncryptedToolOutputRejection(ctx, account, body, smartWSError) }()
 	if account.Platform == PlatformKiro {
 		return s.forwardKiroCompatible(ctx, c, account, body, "responses")
 	}
