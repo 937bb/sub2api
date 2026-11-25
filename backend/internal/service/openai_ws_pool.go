@@ -104,6 +104,9 @@ type openAIWSHandshakeCompatibilityKey struct {
 	threadID            string
 	clientRequestID     string
 	codexWindowID       string
+	// Reported identity is fixed by the handshake. Requests reporting different
+	// gateway identities must not share an upstream connection.
+	reportedIdentity string
 }
 
 type openAIWSConnLease struct {
@@ -2509,6 +2512,7 @@ func normalizeOpenAIWSBetaFeatures(headers http.Header) string {
 func normalizeOpenAIWSHandshakeCompatibility(account *Account, headers http.Header) openAIWSHandshakeCompatibilityKey {
 	key := openAIWSHandshakeCompatibilityKey{
 		betaFeatures:     normalizeOpenAIWSBetaFeatures(headers),
+		reportedIdentity: account.headerOverrideReportedIdentity(headers),
 		userAgent:        codexIdentityHeaderValue(headers, "User-Agent"),
 		originator:       codexIdentityHeaderValue(headers, "Originator"),
 		clientVersion:    codexIdentityHeaderValue(headers, "Version"),
