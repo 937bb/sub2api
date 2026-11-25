@@ -379,12 +379,11 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			_ = resp.Body.Close()
 			resp.Body = io.NopCloser(bytes.NewReader(probeBody))
 			if !invalidEncryptedRecoveryTried && isOpenAIInvalidEncryptedContentResponse(resp.StatusCode, probeBody) {
-				cleaned, changed, cleanErr := SanitizeOpenAIEncryptedContent(body)
+				cleaned, changed, cleanErr := s.recoverOpenAIRejectedEncryptedHistory(c, account, body, probeBody, 0)
 				if cleanErr != nil {
 					return nil, cleanErr
 				}
 				if changed {
-					s.markOpenAIWSInvalidEncryptedContentLineageFromPayload(c, body, "passthrough_invalid_encrypted_lineage_mark", account.ID, 0)
 					body = cleaned
 					invalidEncryptedRecoveryTried = true
 					rejectedFieldRetryState.remember(body)

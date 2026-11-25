@@ -215,86 +215,103 @@ func TestEncryptedContentBridgeTerminalCarriesSchedulingError(t *testing.T) {
 }
 
 func TestEncryptedContentNativeWSRetriesSelfContainedTurnOnce(t *testing.T) {
-	for _, terminal := range []bool{false, true} {
-		t.Run(fmt.Sprint(terminal), func(t *testing.T) {
-			cfg := &config.Config{}
-			cfg.Gateway.OpenAIWS.Enabled = true
-			cfg.Gateway.OpenAIWS.APIKeyEnabled = true
-			cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
-			cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
-			cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
-			rejection := []byte(`{"type":"error","error":{"code":"invalid_encrypted_content","message":"encrypted content hydration failed"}}`)
-			first := &openAIWSCaptureConn{events: [][]byte{rejection}}
-			second := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_recovered","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)}}
-			if terminal {
-				second.events = [][]byte{rejection, []byte(`{"type":"response.failed","response":{"id":"resp_failed","error":{"code":"invalid_encrypted_content","message":"encrypted content hydration failed"}}}`)}
-			}
-			dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{first, second}}
-			pool := newOpenAIWSConnPool(cfg)
-			pool.setClientDialerForTest(dialer)
-			defer pool.Close()
-			svc := &OpenAIGatewayService{cfg: cfg, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool}
-			account := &Account{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "test-only"}, Extra: map[string]any{"responses_websockets_v2_enabled": true}}
-			results := make(chan *OpenAIForwardResult, 1)
-			done := make(chan error, 1)
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				conn, err := coderws.Accept(w, r, nil)
-				if err != nil {
-					done <- err
-					return
+	for _, mixed := range []bool{false, true} {
+		for _, terminal := range []bool{false, true} {
+			t.Run(fmt.Sprintf("mixed=%v/terminal=%v", mixed, terminal), func(t *testing.T) {
+				cfg := &config.Config{}
+				cfg.Gateway.OpenAIWS.Enabled = true
+				cfg.Gateway.OpenAIWS.APIKeyEnabled = true
+				cfg.Gateway.OpenAIWS.ResponsesWebsocketsV2 = true
+				cfg.Gateway.OpenAIWS.MaxConnsPerAccount = 1
+				cfg.Gateway.OpenAIWS.MaxIdlePerAccount = 1
+				rejection := []byte(`{"type":"error","error":{"code":"invalid_encrypted_content","message":"encrypted content hydration failed"}}`)
+				fixture := encryptedMessageFixture
+				if mixed {
+					fixture = mixedEncryptedHistory
+					rejection = []byte(strings.Replace(mixedEncryptedRejection, `{"error":`, `{"type":"error","error":`, 1))
 				}
+				first := &openAIWSCaptureConn{events: [][]byte{rejection}}
+				second := &openAIWSCaptureConn{events: [][]byte{[]byte(`{"type":"response.completed","response":{"id":"resp_recovered","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`)}}
+				if terminal {
+					if mixed {
+						rejection = []byte(strings.ReplaceAll(string(rejection), "rs_bad", "rs_good"))
+					}
+					second.events = [][]byte{rejection, []byte(`{"type":"response.failed","response":{"id":"resp_failed","error":{"code":"invalid_encrypted_content","message":"encrypted content hydration failed"}}}`)}
+				}
+				dialer := &openAIWSQueueDialer{conns: []openAIWSClientConn{first, second}}
+				pool := newOpenAIWSConnPool(cfg)
+				pool.setClientDialerForTest(dialer)
+				defer pool.Close()
+				svc := &OpenAIGatewayService{cfg: cfg, cache: &stubGatewayCache{}, openaiWSResolver: NewOpenAIWSProtocolResolver(cfg), toolCorrector: NewCodexToolCorrector(), openaiWSPool: pool}
+				account := &Account{ID: 12, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true, Concurrency: 1, Credentials: map[string]any{"api_key": "test-only"}, Extra: map[string]any{"responses_websockets_v2_enabled": true}}
+				results := make(chan *OpenAIForwardResult, 1)
+				done := make(chan error, 1)
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					conn, err := coderws.Accept(w, r, nil)
+					if err != nil {
+						done <- err
+						return
+					}
+					defer conn.CloseNow()
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = r
+					payload := []byte(strings.Replace(fixture, `{"model":`, `{"type":"response.create","model":`, 1))
+					done <- svc.ProxyResponsesWebSocketFromClient(ctx, c, conn, account, "test-only", payload, &OpenAIWSIngressHooks{AfterTurn: func(_ int, result *OpenAIForwardResult, _ error) { results <- result }})
+				}))
+				defer server.Close()
+				conn, _, err := coderws.Dial(ctx, server.URL, nil)
+				require.NoError(t, err)
 				defer conn.CloseNow()
-				c, _ := gin.CreateTestContext(httptest.NewRecorder())
-				c.Request = r
-				payload := []byte(strings.Replace(encryptedMessageFixture, `{"model":`, `{"type":"response.create","model":`, 1))
-				done <- svc.ProxyResponsesWebSocketFromClient(ctx, c, conn, account, "test-only", payload, &OpenAIWSIngressHooks{AfterTurn: func(_ int, result *OpenAIForwardResult, _ error) { results <- result }})
-			}))
-			defer server.Close()
-			conn, _, err := coderws.Dial(ctx, server.URL, nil)
-			require.NoError(t, err)
-			defer conn.CloseNow()
-			_, event, err := conn.Read(ctx)
-			require.NoError(t, err)
-			if terminal {
-				require.Equal(t, "error", gjson.GetBytes(event, "type").String())
-				_, event, err = conn.Read(ctx)
+				_, event, err := conn.Read(ctx)
 				require.NoError(t, err)
-				require.Equal(t, "response.failed", gjson.GetBytes(event, "type").String())
-			} else {
-				require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
-			}
-			var result *OpenAIForwardResult
-			select {
-			case result = <-results:
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			}
-			require.NotNil(t, result)
-			if terminal {
-				require.ErrorIs(t, result.SchedulingError(), errOpenAIInvalidEncryptedContent)
-			} else {
-				require.NoError(t, result.SchedulingError())
-			}
-			require.NoError(t, conn.Close(coderws.StatusNormalClosure, "done"))
-			select {
-			case err := <-done:
-				require.NoError(t, err)
-			case <-ctx.Done():
-				t.Fatal(ctx.Err())
-			}
-			require.Equal(t, 2, dialer.DialCount())
-			first.mu.Lock()
-			firstBody, _ := json.Marshal(first.lastWrite)
-			first.mu.Unlock()
-			second.mu.Lock()
-			secondBody, _ := json.Marshal(second.lastWrite)
-			writeCount := len(second.writes)
-			second.mu.Unlock()
-			require.True(t, OpenAIRequestHasEncryptedContent(firstBody))
-			require.False(t, OpenAIRequestHasEncryptedContent(secondBody))
-			require.Equal(t, 1, writeCount)
-		})
+				if terminal {
+					require.Equal(t, "error", gjson.GetBytes(event, "type").String())
+					_, event, err = conn.Read(ctx)
+					require.NoError(t, err)
+					require.Equal(t, "response.failed", gjson.GetBytes(event, "type").String())
+				} else {
+					require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+				}
+				var result *OpenAIForwardResult
+				select {
+				case result = <-results:
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+				require.NotNil(t, result)
+				if terminal {
+					require.ErrorIs(t, result.SchedulingError(), errOpenAIInvalidEncryptedContent)
+				} else {
+					require.NoError(t, result.SchedulingError())
+				}
+				require.NoError(t, conn.Close(coderws.StatusNormalClosure, "done"))
+				select {
+				case err := <-done:
+					require.NoError(t, err)
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+				require.Equal(t, 2, dialer.DialCount())
+				first.mu.Lock()
+				firstBody, _ := json.Marshal(first.lastWrite)
+				first.mu.Unlock()
+				second.mu.Lock()
+				secondBody, _ := json.Marshal(second.lastWrite)
+				writeCount := len(second.writes)
+				second.mu.Unlock()
+				require.True(t, OpenAIRequestHasEncryptedContent(firstBody))
+				if mixed {
+					require.NotContains(t, string(secondBody), "bad-reasoning")
+					require.Contains(t, string(secondBody), "keep-reasoning")
+					require.Contains(t, string(secondBody), "keep-tool-result")
+				} else {
+					require.False(t, OpenAIRequestHasEncryptedContent(secondBody))
+				}
+				require.Equal(t, 1, writeCount)
+			})
+		}
 	}
+
 }

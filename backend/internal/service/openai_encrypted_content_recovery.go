@@ -49,10 +49,11 @@ func visitOpenAIEncryptedParts(item gjson.Result, visit func(string)) {
 		visit(openAIEncryptedFragmentKey(item.Raw))
 		return
 	}
-	if kind != "message" && !(kind == "" && role == "assistant") {
+	agentPlaintext := kind == "agent_message" && openAIAgentMessageHasPlaintext(item)
+	if kind != "message" && !(kind == "" && role == "assistant") && !agentPlaintext {
 		return
 	}
-	if role != "" && role != "assistant" {
+	if role != "" && role != "assistant" && !agentPlaintext {
 		return
 	}
 	item.Get("content").ForEach(func(_, part gjson.Result) bool {
@@ -107,7 +108,12 @@ func sanitizeOpenAIEncryptedInputItem(item any, invalid map[string]struct{}) (an
 		}
 		return item, false, true
 	}
-	if (kind != "message" && !(kind == "" && role == "assistant")) || (role != "" && role != "assistant") {
+	agentPlaintext := false
+	if kind == "agent_message" && invalid != nil {
+		raw, _ := json.Marshal(value)
+		agentPlaintext = openAIAgentMessageHasPlaintext(gjson.ParseBytes(raw))
+	}
+	if !agentPlaintext && ((kind != "message" && !(kind == "" && role == "assistant")) || (role != "" && role != "assistant")) {
 		return item, false, true
 	}
 	changed := false
