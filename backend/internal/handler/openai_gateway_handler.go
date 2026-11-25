@@ -3909,7 +3909,9 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 		return
 	}
 
-	// Normal case: return JSON response with proper status code
+	// An upstream stream may have staged SSE headers without committing them.
+	// Keep the error body and content type consistent before the first byte.
+	c.Header("Content-Type", "application/json; charset=utf-8")
 	if code == "" {
 		h.errorResponse(c, status, errType, message)
 		return

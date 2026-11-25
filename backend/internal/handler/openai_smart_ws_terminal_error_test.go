@@ -59,6 +59,7 @@ func TestSmartWSRateLimitRemains429WithoutReplay(t *testing.T) {
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+		c.Header("Content-Type", "text/event-stream")
 		if heartbeat {
 			_, _ = c.Writer.WriteString(":\n\n")
 			c.Writer.Flush()
@@ -74,6 +75,7 @@ func TestSmartWSRateLimitRemains429WithoutReplay(t *testing.T) {
 		} else {
 			require.Equal(t, http.StatusTooManyRequests, rec.Code)
 			require.True(t, gjson.ValidBytes(rec.Body.Bytes()))
+			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 		}
 	}
 }
@@ -83,6 +85,7 @@ func TestSmartWSUnavailableRemains503WithoutReplay(t *testing.T) {
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+		c.Header("Content-Type", "text/event-stream")
 		if heartbeat {
 			_, _ = c.Writer.WriteString(":\n\n")
 			c.Writer.Flush()
@@ -98,6 +101,7 @@ func TestSmartWSUnavailableRemains503WithoutReplay(t *testing.T) {
 		} else {
 			require.Equal(t, http.StatusServiceUnavailable, rec.Code)
 			require.True(t, gjson.ValidBytes(rec.Body.Bytes()))
+			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 		}
 	}
 }
@@ -107,6 +111,7 @@ func TestSmartWSMissingItemRemains400WithoutReplay(t *testing.T) {
 		rec := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(rec)
 		c.Request = httptest.NewRequest(http.MethodPost, EndpointResponses, nil)
+		c.Header("Content-Type", "text/event-stream")
 		if heartbeat {
 			_, _ = c.Writer.WriteString(":\n\n")
 			c.Writer.Flush()
@@ -122,6 +127,7 @@ func TestSmartWSMissingItemRemains400WithoutReplay(t *testing.T) {
 		} else {
 			require.Equal(t, http.StatusBadRequest, rec.Code)
 			require.True(t, gjson.ValidBytes(rec.Body.Bytes()))
+			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
 		}
 	}
 }
