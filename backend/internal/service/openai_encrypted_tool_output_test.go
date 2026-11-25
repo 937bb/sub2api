@@ -275,3 +275,34 @@ func TestEncryptedToolOutputNativeWSNeverReplays(t *testing.T) {
 		})
 	}
 }
+
+func TestEncryptedToolOutputPassthroughCompactKeepsRequestFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	MarkOpenAICompactClientStream(c)
+	stop := StartOpenAICompactSSEKeepalive(c, keepaliveTestInterval)
+	defer stop()
+	waitForKeepaliveBeats()
+
+	account := &Account{
+		ID: 201, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Credentials: map[string]any{"api_key": "sk-test-secret", "base_url": "https://relay.example"},
+	}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}}
+	body := []byte(`{"error":{"type":"invalid_request_error","code":"invalid_encrypted_content","message":"Encrypted function output content could not be decrypted or decoded. relay.example sk-test-secret"}}`)
+	err := svc.handleErrorResponsePassthrough(context.Background(), &http.Response{
+		StatusCode: http.StatusBadRequest, Header: make(http.Header),
+	}, c, account, []byte(encryptedToolOutputFixture), body)
+
+	require.ErrorIs(t, err, errOpenAIInvalidEncryptedToolOutput)
+	require.Equal(t, http.StatusOK, rec.Code)
+	events := parseCompactBridgeSSE(t, stripKeepaliveComments(rec.Body.String()))
+	require.Len(t, events, 1)
+	require.Equal(t, "response.failed", events[0][0])
+	require.Equal(t, "invalid_encrypted_content", gjson.Get(events[0][1], "response.error.code").String())
+	require.Contains(t, gjson.Get(events[0][1], "response.error.message").String(), encryptedToolOutputMessage)
+	require.NotContains(t, rec.Body.String(), "relay.example")
+	require.NotContains(t, rec.Body.String(), "sk-test-secret")
+}
