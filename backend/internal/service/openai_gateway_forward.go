@@ -28,6 +28,32 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if account.Platform == PlatformKiro {
 		return s.forwardKiroCompatible(ctx, c, account, body, "responses")
 	}
+	// Resolve history ownership before account-specific namespace transforms and
+	// before the passthrough branch can bypass the common forwarding path.
+	lineageGroupID := getOpenAIGroupIDFromContext(c)
+	lineageSessionHash := s.openAIWSLineageSessionHashFromContext(c, body)
+	if c != nil && lineageSessionHash != "" {
+		c.Set(openAIWSIngressSessionHashContextKey, lineageSessionHash)
+	}
+	if stateStore := s.getOpenAIWSStateStore(); stateStore != nil && stateStore.HasAnySessionInvalidEncryptedContent() {
+		if invalidDigests := stateStore.GetSessionInvalidEncryptedContentDigests(lineageGroupID, lineageSessionHash); len(invalidDigests) > 0 {
+			strippedBody, strippedCount := s.stripSessionInvalidEncryptedContentLogged(
+				body, invalidDigests, "invalid_encrypted_lineage_strip", account.ID, 0,
+			)
+			if strippedCount > 0 {
+				body = strippedBody
+			}
+		}
+	}
+	historyBody := body
+	defer func() {
+		// A terminal stream rejection cannot be replayed. Remember its rejected
+		// history for the next client turn without repeating dispatched tools.
+		if isOpenAIInvalidEncryptedContentError(smartWSError) {
+			_, _, _ = s.recoverOpenAIRejectedEncryptedHistory(c, account, historyBody, openAIEncryptedRejectionFromError(smartWSError), 0)
+		}
+	}()
+
 	sanitizedBody, sanitizeErr := SanitizeOpenAIEncryptedContentForAccount(ctx, account, body)
 	if sanitizeErr != nil {
 		return nil, sanitizeErr
@@ -787,27 +813,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		requestView = newOpenAIRequestView(body)
 		reqBody = nil
 	}
-	// 剥离本会话已被上游判定失效的加密项（invalid_encrypted_content lineage），
-	// 阻断同一失效密文随客户端历史在每一轮重复触发"被拒→剥离→重试/重连"。
-	// lineage 会话键统一按进场形态的 body 派生：后续重试可能改写 body，
-	// 延迟计算会与下一请求的进场键漂移。
-	lineageGroupID := getOpenAIGroupIDFromContext(c)
-	lineageSessionHash := s.openAIWSLineageSessionHashFromContext(c, body)
-	if c != nil && lineageSessionHash != "" {
-		c.Set(openAIWSIngressSessionHashContextKey, lineageSessionHash)
-	}
-	if stateStore := s.getOpenAIWSStateStore(); stateStore != nil && stateStore.HasAnySessionInvalidEncryptedContent() {
-		if invalidDigests := stateStore.GetSessionInvalidEncryptedContentDigests(lineageGroupID, lineageSessionHash); len(invalidDigests) > 0 {
-			strippedBody, strippedCount := s.stripSessionInvalidEncryptedContentLogged(
-				body, invalidDigests, "invalid_encrypted_lineage_strip", account.ID, 0,
-			)
-			if strippedCount > 0 {
-				body = strippedBody
-				requestView = newOpenAIRequestView(body)
-				reqBody = nil
-			}
-		}
-	}
+
 	imageBillingModel := ""
 	imageSizeTier := ""
 	imageInputSize := ""
